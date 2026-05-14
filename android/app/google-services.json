@@ -1,0 +1,49 @@
+{
+  "project_info": {
+    "project_number": "906889057538",
+    "firebase_url": "https://qurbanqu-446b0-default-rtdb.asia-southeast1.firebasedatabase.app",
+    "project_id": "qurbanqu-446b0",
+    "storage_bucket": "qurbanqu-446b0.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:906889057538:android:e5183e864c5479cc6a1e1b",
+        "android_client_info": {
+          "package_name": "com.example.qurban_ku"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBfoBPYgMA-ipdP4cuZRYj7YMdURteSmxs"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:906889057538:android:1d79122a01adcd0d6a1e1b",
+        "android_client_info": {
+          "package_name": "com.example.template_flutter"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBfoBPYgMA-ipdP4cuZRYj7YMdURteSmxs"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

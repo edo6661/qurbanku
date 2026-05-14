@@ -1,0 +1,4866 @@
+ini notifikasi nya dari notifikasi hp bisa tidak ya
+<file path="analysis_options.yaml">
+include: package:flutter_lints/flutter.yaml
+analyzer:
+  language:
+    strict-casts: true
+    strict-inference: true
+    strict-raw-types: true
+linter:
+  rules:
+</file>
+
+<file path="lib/app.dart">
+import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:qurban_ku/blocs/admin/admin_bloc.dart';
+import 'package:qurban_ku/blocs/admin/admin_event.dart';
+import 'package:qurban_ku/services/savings_service.dart';
+import 'package:qurban_ku/services/storage_service.dart';
+import 'blocs/auth/auth_bloc.dart';
+import 'blocs/auth/auth_event.dart';
+import 'services/auth_service.dart';
+import 'models/user_model.dart';
+import 'blocs/auth/auth_state.dart';
+import 'pages/auth/login_page.dart';
+import 'pages/admin/admin_dashboard_page.dart';
+import 'pages/peserta/peserta_dashboard_page.dart';
+import 'blocs/savings/savings_bloc.dart';
+class App extends StatelessWidget {
+  final AuthService authService;
+  final StorageService storageService;
+  final SavingsService savingsService;
+  const App({
+    super.key,
+    required this.authService,
+    required this.storageService,
+    required this.savingsService,
+  });
+  @override
+  Widget build(BuildContext context) {
+    return MultiRepositoryProvider(
+      providers: [
+        RepositoryProvider.value(value: authService),
+        RepositoryProvider.value(value: storageService),
+        RepositoryProvider.value(value: savingsService),
+      ],
+      child: MultiBlocProvider(
+        providers: [
+          BlocProvider<AuthBloc>(
+            create: (context) =>
+                AuthBloc(authService: context.read<AuthService>())
+                  ..add(AuthCheckRequested()),
+          ),
+          BlocProvider<SavingsBloc>(
+            create: (context) =>
+                SavingsBloc(savingsService: context.read<SavingsService>()),
+          ),
+          BlocProvider<AdminBloc>(
+            create: (context) =>
+                AdminBloc(savingsService: context.read<SavingsService>())
+                  ..add(LoadPendingTransactions()),
+          ),
+        ],
+        child: const AppView(),
+      ),
+    );
+  }
+}
+class AppView extends StatelessWidget {
+  const AppView({super.key});
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'Tabungan Kurban',
+      theme: ThemeData(
+        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF2E7D32)),
+        useMaterial3: true,
+      ),
+      home: BlocBuilder<AuthBloc, AuthState>(
+        buildWhen: (previous, current) {
+          if (current is AuthError) return false;
+          if (current is AuthLoading) return false;
+          return true;
+        },
+        builder: (context, state) {
+          if (state is AuthAuthenticated) {
+            if (state.user.role == UserRole.admin) {
+              return const AdminDashboardPage();
+            } else {
+              return const PesertaDashboardPage();
+            }
+          }
+          return const LoginPage();
+        },
+      ),
+    );
+  }
+}
+</file>
+
+<file path="lib/blocs/admin/admin_bloc.dart">
+import 'dart:async';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import '../../models/transaction_model.dart';
+import '../../services/savings_service.dart';
+import 'admin_event.dart';
+import 'admin_state.dart';
+class AdminBloc extends Bloc<AdminEvent, AdminState> {
+  final SavingsService _savingsService;
+  StreamSubscription<List<TransactionModel>>? _transactionsSubscription;
+  AdminBloc({required SavingsService savingsService})
+    : _savingsService = savingsService,
+      super(AdminInitial()) {
+    on<LoadPendingTransactions>(_onLoadPendingTransactions);
+    on<PendingTransactionsUpdated>(_onPendingTransactionsUpdated);
+    on<PendingTransactionsError>(_onPendingTransactionsError);
+    on<ApproveTransactionRequested>(_onApproveTransactionRequested);
+    on<RejectTransactionRequested>(_onRejectTransactionRequested);
+  }
+  void _onLoadPendingTransactions(
+    LoadPendingTransactions event,
+    Emitter<AdminState> emit,
+  ) {
+    emit(AdminLoading());
+    _transactionsSubscription?.cancel();
+    _transactionsSubscription = _savingsService
+        .getPendingTransactionsStream()
+        .listen(
+          (transactions) {
+            add(PendingTransactionsUpdated(transactions));
+          },
+          onError: (Object error) {
+            add(
+              PendingTransactionsError(
+                'Gagal memuat data: ${error.toString()}',
+              ),
+            );
+          },
+        );
+  }
+  void _onPendingTransactionsUpdated(
+    PendingTransactionsUpdated event,
+    Emitter<AdminState> emit,
+  ) {
+    emit(AdminLoaded(event.transactions));
+  }
+  void _onPendingTransactionsError(
+    PendingTransactionsError event,
+    Emitter<AdminState> emit,
+  ) {
+    emit(AdminError(event.message));
+  }
+  Future<void> _onApproveTransactionRequested(
+    ApproveTransactionRequested event,
+    Emitter<AdminState> emit,
+  ) async {
+    // ... hapus final currentState = state;
+    emit(AdminActionProcessing());
+    try {
+      await _savingsService.approveTransaction(event.transaction);
+      emit(const AdminActionSuccess('Transaksi berhasil disetujui.'));
+    } catch (e) {
+      emit(AdminError('Gagal menyetujui transaksi: ${e.toString()}'));
+    }
+  }
+  Future<void> _onRejectTransactionRequested(
+    RejectTransactionRequested event,
+    Emitter<AdminState> emit,
+  ) async {
+    // ... hapus final currentState = state;
+    emit(AdminActionProcessing());
+    try {
+      await _savingsService.rejectTransaction(
+        event.transactionId,
+        event.adminNote,
+      );
+      emit(const AdminActionSuccess('Transaksi berhasil ditolak.'));
+    } catch (e) {
+      emit(AdminError('Gagal menolak transaksi: ${e.toString()}'));
+    }
+    // HAPUS BLOK IF DI BAWAH INI:
+    // if (currentState is AdminLoaded) {
+    //   emit(AdminLoaded(currentState.pendingTransactions));
+    // }
+  }
+  @override
+  Future<void> close() {
+    _transactionsSubscription?.cancel();
+    return super.close();
+  }
+}
+</file>
+
+<file path="lib/blocs/admin/admin_event.dart">
+import 'package:equatable/equatable.dart';
+import '../../models/transaction_model.dart';
+abstract class AdminEvent extends Equatable {
+  const AdminEvent();
+  @override
+  List<Object?> get props => [];
+}
+class LoadPendingTransactions extends AdminEvent {}
+class PendingTransactionsUpdated extends AdminEvent {
+  final List<TransactionModel> transactions;
+  const PendingTransactionsUpdated(this.transactions);
+  @override
+  List<Object?> get props => [transactions];
+}
+class ApproveTransactionRequested extends AdminEvent {
+  final TransactionModel transaction;
+  const ApproveTransactionRequested(this.transaction);
+  @override
+  List<Object?> get props => [transaction];
+}
+class RejectTransactionRequested extends AdminEvent {
+  final String transactionId;
+  final String adminNote;
+  const RejectTransactionRequested({
+    required this.transactionId,
+    required this.adminNote,
+  });
+  @override
+  List<Object?> get props => [transactionId, adminNote];
+}
+class PendingTransactionsError extends AdminEvent {
+  final String message;
+  const PendingTransactionsError(this.message);
+  @override
+  List<Object?> get props => [message];
+}
+</file>
+
+<file path="lib/blocs/admin/admin_state.dart">
+import 'package:equatable/equatable.dart';
+import '../../models/transaction_model.dart';
+abstract class AdminState extends Equatable {
+  const AdminState();
+  @override
+  List<Object?> get props => [];
+}
+class AdminInitial extends AdminState {}
+class AdminLoading extends AdminState {}
+class AdminLoaded extends AdminState {
+  final List<TransactionModel> pendingTransactions;
+  const AdminLoaded(this.pendingTransactions);
+  @override
+  List<Object?> get props => [pendingTransactions];
+}
+class AdminError extends AdminState {
+  final String message;
+  const AdminError(this.message);
+  @override
+  List<Object?> get props => [message];
+}
+class AdminActionProcessing extends AdminState {}
+class AdminActionSuccess extends AdminState {
+  final String message;
+  const AdminActionSuccess(this.message);
+  @override
+  List<Object?> get props => [message];
+}
+</file>
+
+<file path="lib/blocs/auth/auth_bloc.dart">
+import 'package:flutter_bloc/flutter_bloc.dart';
+import '../../services/auth_service.dart';
+import 'auth_event.dart';
+import 'auth_state.dart';
+class AuthBloc extends Bloc<AuthEvent, AuthState> {
+  final AuthService _authService;
+  AuthBloc({required AuthService authService})
+    : _authService = authService,
+      super(AuthInitial()) {
+    on<AuthLoginRequested>(_onLoginRequested);
+    on<AuthLogoutRequested>(_onLogoutRequested);
+    on<AuthCheckRequested>(_onCheckRequested);
+    on<AuthRegisterRequested>(_onRegisterRequested);
+  }
+  Future<void> _onLoginRequested(
+    AuthLoginRequested event,
+    Emitter<AuthState> emit,
+  ) async {
+    emit(AuthLoading());
+    try {
+      final user = await _authService.signInWithEmailPassword(
+        event.email,
+        event.password,
+      );
+      emit(AuthAuthenticated(user));
+    } catch (e) {
+      final errorMessage = e.toString().replaceAll('Exception: ', '');
+      emit(AuthError(errorMessage));
+    }
+  }
+  Future<void> _onLogoutRequested(
+    AuthLogoutRequested event,
+    Emitter<AuthState> emit,
+  ) async {
+    emit(AuthLoading());
+    try {
+      await _authService.signOut();
+      emit(AuthUnauthenticated());
+    } catch (e) {
+      emit(AuthError('Gagal keluar akun: ${e.toString()}'));
+    }
+  }
+  Future<void> _onCheckRequested(
+    AuthCheckRequested event,
+    Emitter<AuthState> emit,
+  ) async {
+    try {
+      emit(AuthUnauthenticated());
+    } catch (e) {
+      emit(AuthUnauthenticated());
+    }
+  }
+  Future<void> _onRegisterRequested(
+    AuthRegisterRequested event,
+    Emitter<AuthState> emit,
+  ) async {
+    emit(AuthLoading());
+    try {
+      final user = await _authService.registerWithEmailPassword(
+        event.name,
+        event.email,
+        event.password,
+      );
+      emit(AuthAuthenticated(user));
+    } catch (e) {
+      final errorMessage = e.toString().replaceAll('Exception: ', '');
+      emit(AuthError(errorMessage));
+    }
+  }
+}
+</file>
+
+<file path="lib/blocs/auth/auth_event.dart">
+import 'package:equatable/equatable.dart';
+abstract class AuthEvent extends Equatable {
+  const AuthEvent();
+  @override
+  List<Object?> get props => [];
+}
+class AuthCheckRequested extends AuthEvent {}
+class AuthLoginRequested extends AuthEvent {
+  final String email;
+  final String password;
+  const AuthLoginRequested({required this.email, required this.password});
+  @override
+  List<Object?> get props => [email, password];
+}
+class AuthLogoutRequested extends AuthEvent {}
+class AuthRegisterRequested extends AuthEvent {
+  final String name;
+  final String email;
+  final String password;
+  const AuthRegisterRequested({
+    required this.name,
+    required this.email,
+    required this.password,
+  });
+  @override
+  List<Object?> get props => [name, email, password];
+}
+</file>
+
+<file path="lib/blocs/auth/auth_state.dart">
+import 'package:equatable/equatable.dart';
+import '../../models/user_model.dart';
+abstract class AuthState extends Equatable {
+  const AuthState();
+  @override
+  List<Object?> get props => [];
+}
+class AuthInitial extends AuthState {}
+class AuthLoading extends AuthState {}
+class AuthAuthenticated extends AuthState {
+  final UserModel user;
+  const AuthAuthenticated(this.user);
+  @override
+  List<Object?> get props => [user];
+}
+class AuthUnauthenticated extends AuthState {}
+class AuthError extends AuthState {
+  final String message;
+  const AuthError(this.message);
+  @override
+  List<Object?> get props => [message];
+}
+</file>
+
+<file path="lib/blocs/savings/savings_bloc.dart">
+import 'dart:async';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import '../../models/user_saving_model.dart';
+import '../../services/savings_service.dart';
+import 'savings_event.dart';
+import 'savings_state.dart';
+class SavingsBloc extends Bloc<SavingsEvent, SavingsState> {
+  final SavingsService _savingsService;
+  StreamSubscription<List<UserSavingModel>>?
+  _savingsSubscription; // Berubah tipe
+  SavingsBloc({required SavingsService savingsService})
+    : _savingsService = savingsService,
+      super(SavingsInitial()) {
+    on<LoadSavingsData>(_onLoadSavingsData);
+    on<SavingsUpdated>(_onSavingsUpdated);
+    on<SavingsErrorOccurred>(_onSavingsErrorOccurred);
+  }
+  void _onLoadSavingsData(LoadSavingsData event, Emitter<SavingsState> emit) {
+    emit(SavingsLoading());
+    _savingsSubscription?.cancel();
+    _savingsSubscription = _savingsService
+        .getUserSavingsStream(event.userId) // Panggil fungsi yang baru
+        .listen(
+          (savings) => add(SavingsUpdated(savings)),
+          onError: (Object error) =>
+              add(SavingsErrorOccurred(error.toString())),
+        );
+  }
+  Future<void> _onSavingsUpdated(
+    SavingsUpdated event,
+    Emitter<SavingsState> emit,
+  ) async {
+    final savings = event.savings;
+    if (savings.isEmpty) {
+      emit(SavingsEmpty());
+      return;
+    }
+    try {
+      List<SavingItem> items = [];
+      for (var saving in savings) {
+        final targetDetail = await _savingsService.getTargetDetail(
+          saving.targetId,
+        );
+        double progressPercentage =
+            (saving.currentBalance / targetDetail.targetAmount) * 100;
+        if (progressPercentage > 100.0) progressPercentage = 100.0;
+        items.add(
+          SavingItem(
+            userSaving: saving,
+            targetDetail: targetDetail,
+            progressPercentage: progressPercentage,
+          ),
+        );
+      }
+      emit(SavingsLoaded(items));
+    } catch (e) {
+      emit(SavingsError('Gagal memuat target tabungan:\n${e.toString()}'));
+    }
+  }
+  void _onSavingsErrorOccurred(
+    SavingsErrorOccurred event,
+    Emitter<SavingsState> emit,
+  ) {
+    emit(SavingsError(event.error));
+  }
+  @override
+  Future<void> close() {
+    _savingsSubscription?.cancel();
+    return super.close();
+  }
+}
+</file>
+
+<file path="lib/blocs/savings/savings_event.dart">
+import 'package:equatable/equatable.dart';
+import '../../models/user_saving_model.dart';
+abstract class SavingsEvent extends Equatable {
+  const SavingsEvent();
+  @override
+  List<Object?> get props => [];
+}
+class LoadSavingsData extends SavingsEvent {
+  final String userId;
+  const LoadSavingsData({required this.userId});
+  @override
+  List<Object?> get props => [userId];
+}
+class SavingsUpdated extends SavingsEvent {
+  final List<UserSavingModel> savings;
+  const SavingsUpdated(this.savings);
+  @override
+  List<Object?> get props => [savings];
+}
+class SavingsErrorOccurred extends SavingsEvent {
+  final String error;
+  const SavingsErrorOccurred(this.error);
+  @override
+  List<Object?> get props => [error];
+}
+</file>
+
+<file path="lib/blocs/savings/savings_state.dart">
+import 'package:equatable/equatable.dart';
+import '../../models/saving_target_model.dart';
+import '../../models/user_saving_model.dart';
+class SavingItem extends Equatable {
+  final UserSavingModel userSaving;
+  final SavingTargetModel targetDetail;
+  final double progressPercentage;
+  const SavingItem({
+    required this.userSaving,
+    required this.targetDetail,
+    required this.progressPercentage,
+  });
+  @override
+  List<Object?> get props => [userSaving, targetDetail, progressPercentage];
+}
+abstract class SavingsState extends Equatable {
+  const SavingsState();
+  @override
+  List<Object?> get props => [];
+}
+class SavingsInitial extends SavingsState {}
+class SavingsLoading extends SavingsState {}
+class SavingsEmpty extends SavingsState {}
+class SavingsLoaded extends SavingsState {
+  final List<SavingItem> savingsList;
+  const SavingsLoaded(this.savingsList);
+  @override
+  List<Object?> get props => [savingsList];
+}
+class SavingsError extends SavingsState {
+  final String message;
+  const SavingsError(this.message);
+  @override
+  List<Object?> get props => [message];
+}
+</file>
+
+<file path="lib/blocs/transaction/transaction_bloc.dart">
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import '../../models/transaction_model.dart';
+import '../../services/savings_service.dart';
+import '../../services/storage_service.dart';
+import 'transaction_event.dart';
+import 'transaction_state.dart';
+class TransactionBloc extends Bloc<TransactionEvent, TransactionState> {
+  final StorageService _storageService;
+  final SavingsService _savingsService;
+  TransactionBloc({
+    required StorageService storageService,
+    required SavingsService savingsService,
+  }) : _storageService = storageService,
+       _savingsService = savingsService,
+       super(TransactionInitial()) {
+    on<SubmitTransaction>(_onSubmitTransaction);
+    on<UpdateTransaction>(_onUpdateTransaction);
+  }
+  Future<void> _onSubmitTransaction(
+    SubmitTransaction event,
+    Emitter<TransactionState> emit,
+  ) async {
+    emit(TransactionSubmitting());
+    try {
+      // --- TAMBAHAN BARU: Ambil data nama dan bin dari tabungan ---
+      final savingDetail = await _savingsService.getSavingDetail(
+        event.savingId,
+      );
+      final String evidenceUrl = await _storageService
+          .uploadTransactionEvidence(event.evidenceImage, event.userId);
+      final transactionId = FirebaseFirestore.instance
+          .collection('transactions')
+          .doc()
+          .id;
+      final transaction = TransactionModel(
+        id: transactionId,
+        userId: event.userId,
+        savingId: event.savingId,
+        amount: event.amount,
+        evidenceUrl: evidenceUrl,
+        status: TransactionStatus.pending,
+        createdAt: DateTime.now(),
+        // --- TAMBAHAN BARU: Masukkan ke transaksi ---
+        namaPengkurban: savingDetail.namaPengkurban,
+        binBinti: savingDetail.binBinti,
+      );
+      await _savingsService.submitTransaction(transaction);
+      emit(TransactionSuccess());
+    } catch (e) {
+      emit(TransactionError('Gagal mengirim transaksi: ${e.toString()}'));
+    }
+  }
+  Future<void> _onUpdateTransaction(
+    UpdateTransaction event,
+    Emitter<TransactionState> emit,
+  ) async {
+    emit(TransactionSubmitting());
+    try {
+      String evidenceUrl = event.currentEvidenceUrl;
+      if (event.newEvidenceImage != null) {
+        evidenceUrl = await _storageService.uploadTransactionEvidence(
+          event.newEvidenceImage!,
+          event.userId,
+        );
+      }
+      await _savingsService.updateTransaction(
+        transactionId: event.transactionId,
+        amount: event.amount,
+        evidenceUrl: evidenceUrl,
+      );
+      emit(TransactionSuccess());
+    } catch (e) {
+      emit(TransactionError('Gagal memperbarui transaksi: ${e.toString()}'));
+    }
+  }
+}
+</file>
+
+<file path="lib/blocs/transaction/transaction_event.dart">
+import 'dart:io';
+import 'package:equatable/equatable.dart';
+abstract class TransactionEvent extends Equatable {
+  const TransactionEvent();
+  @override
+  List<Object?> get props => [];
+}
+class SubmitTransaction extends TransactionEvent {
+  final double amount;
+  final File evidenceImage;
+  final String userId;
+  final String savingId;
+  const SubmitTransaction({
+    required this.amount,
+    required this.evidenceImage,
+    required this.userId,
+    required this.savingId,
+  });
+  @override
+  List<Object?> get props => [amount, evidenceImage, userId, savingId];
+}
+class UpdateTransaction extends TransactionEvent {
+  final String transactionId;
+  final double amount;
+  final File? newEvidenceImage;
+  final String currentEvidenceUrl;
+  final String userId;
+  const UpdateTransaction({
+    required this.transactionId,
+    required this.amount,
+    this.newEvidenceImage,
+    required this.currentEvidenceUrl,
+    required this.userId,
+  });
+  @override
+  List<Object?> get props => [
+    transactionId,
+    amount,
+    newEvidenceImage,
+    currentEvidenceUrl,
+    userId,
+  ];
+}
+</file>
+
+<file path="lib/blocs/transaction/transaction_state.dart">
+import 'package:equatable/equatable.dart';
+abstract class TransactionState extends Equatable {
+  const TransactionState();
+  @override
+  List<Object?> get props => [];
+}
+class TransactionInitial extends TransactionState {}
+class TransactionSubmitting extends TransactionState {}
+class TransactionSuccess extends TransactionState {}
+class TransactionError extends TransactionState {
+  final String message;
+  const TransactionError(this.message);
+  @override
+  List<Object?> get props => [message];
+}
+</file>
+
+<file path="lib/main.dart">
+import 'package:flutter/material.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:qurban_ku/services/savings_service.dart';
+import 'package:qurban_ku/services/storage_service.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'app.dart';
+import 'services/auth_service.dart';
+@pragma('vm:entry-point')
+Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  await Firebase.initializeApp();
+  print("Handling a background message: ${message.messageId}");
+}
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp();
+  FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+  FirebaseMessaging messaging = FirebaseMessaging.instance;
+  await messaging.requestPermission(alert: true, badge: true, sound: true);
+  String? token = await messaging.getToken();
+  print("FCM Token: $token");
+  FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+    print('Got a message whilst in the foreground!');
+    if (message.notification != null) {
+      print('Message also contained a notification: ${message.notification}');
+    }
+  });
+  await Supabase.initialize(
+    url: 'https://juhkkhsekwlnncxedgbs.supabase.co',
+    anonKey: 'sb_publishable_jVnZ3XGkKvGYjJBqs3c54g_2okvfj9b',
+  );
+  final authService = AuthService();
+  final storageService = StorageService();
+  final savingsService = SavingsService();
+  runApp(
+    App(
+      authService: authService,
+      storageService: storageService,
+      savingsService: savingsService,
+    ),
+  );
+}
+</file>
+
+<file path="lib/models/notification_model.dart.dart">
+// Lokasi: lib/models/notification_model.dart.dart
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:equatable/equatable.dart';
+class NotificationModel extends Equatable {
+  final String id;
+  final String targetUser;
+  final String title;
+  final String message;
+  final bool isRead;
+  final DateTime createdAt;
+  final String?
+  referenceId; // TAMBAHAN: Untuk menyimpan ID referensi (seperti ID Transaksi)
+  const NotificationModel({
+    required this.id,
+    required this.targetUser,
+    required this.title,
+    required this.message,
+    this.isRead = false,
+    required this.createdAt,
+    this.referenceId, // TAMBAHAN
+  });
+  factory NotificationModel.fromJson(Map<String, dynamic> json) {
+    return NotificationModel(
+      id: json['id'] as String,
+      targetUser: json['target_user'] as String,
+      title: json['title'] as String,
+      message: json['message'] as String,
+      isRead: json['is_read'] as bool? ?? false,
+      createdAt: (json['created_at'] as Timestamp).toDate(),
+      referenceId: json['reference_id'] as String?, // TAMBAHAN
+    );
+  }
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'target_user': targetUser,
+      'title': title,
+      'message': message,
+      'is_read': isRead,
+      'created_at': Timestamp.fromDate(createdAt),
+      if (referenceId != null) 'reference_id': referenceId, // TAMBAHAN
+    };
+  }
+  @override
+  List<Object?> get props => [
+    id,
+    targetUser,
+    title,
+    message,
+    isRead,
+    createdAt,
+    referenceId,
+  ];
+}
+</file>
+
+<file path="lib/models/saving_target_model.dart">
+import 'package:equatable/equatable.dart';
+class SavingTargetModel extends Equatable {
+  final String id;
+  final String animalType;
+  final double targetAmount;
+  const SavingTargetModel({
+    required this.id,
+    required this.animalType,
+    required this.targetAmount,
+  });
+  factory SavingTargetModel.fromJson(Map<String, dynamic> json) {
+    return SavingTargetModel(
+      id: json['id'] as String,
+      animalType: json['animal_type'] as String,
+      targetAmount: (json['target_amount'] as num).toDouble(),
+    );
+  }
+  Map<String, dynamic> toJson() {
+    return {'id': id, 'animal_type': animalType, 'target_amount': targetAmount};
+  }
+  @override
+  List<Object?> get props => [id, animalType, targetAmount];
+}
+</file>
+
+<file path="lib/models/transaction_model.dart">
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:equatable/equatable.dart';
+enum TransactionStatus { pending, approved, rejected }
+class TransactionModel extends Equatable {
+  final String id;
+  final String userId;
+  final double amount;
+  final String evidenceUrl;
+  final String savingId;
+  final TransactionStatus status;
+  final String? adminNote;
+  final DateTime createdAt;
+  // --- TAMBAHAN BARU ---
+  final String namaPengkurban;
+  final String binBinti;
+  const TransactionModel({
+    required this.id,
+    required this.userId,
+    required this.amount,
+    required this.evidenceUrl,
+    required this.status,
+    required this.savingId,
+    this.adminNote,
+    required this.createdAt,
+    required this.namaPengkurban, // Tambahan
+    required this.binBinti, // Tambahan
+  });
+  factory TransactionModel.fromJson(Map<String, dynamic> json) {
+    return TransactionModel(
+      id: json['id'] as String,
+      userId: json['user_id'] as String,
+      amount: (json['amount'] as num).toDouble(),
+      evidenceUrl: json['evidence_url'] as String,
+      status: _parseStatus(json['status'] as String?),
+      savingId: json['saving_id'] as String? ?? '',
+      adminNote: json['admin_note'] as String?,
+      createdAt: (json['created_at'] as Timestamp).toDate(),
+      // Gunakan fallback agar data lama sebelum update tidak error
+      namaPengkurban: json['nama_pengkurban'] as String? ?? '-',
+      binBinti: json['bin_binti'] as String? ?? '-',
+    );
+  }
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'user_id': userId,
+      'amount': amount,
+      'evidence_url': evidenceUrl,
+      'status': status.name,
+      'saving_id': savingId,
+      if (adminNote != null) 'admin_note': adminNote,
+      'created_at': Timestamp.fromDate(createdAt),
+      // --- TAMBAHAN BARU ---
+      'nama_pengkurban': namaPengkurban,
+      'bin_binti': binBinti,
+    };
+  }
+  static TransactionStatus _parseStatus(String? statusStr) {
+    switch (statusStr) {
+      case 'approved':
+        return TransactionStatus.approved;
+      case 'rejected':
+        return TransactionStatus.rejected;
+      default:
+        return TransactionStatus.pending;
+    }
+  }
+  @override
+  List<Object?> get props => [
+    id,
+    userId,
+    amount,
+    savingId,
+    evidenceUrl,
+    status,
+    adminNote,
+    createdAt,
+    namaPengkurban, // Tambahan
+    binBinti, // Tambahan
+  ];
+}
+</file>
+
+<file path="lib/models/user_model.dart">
+import 'package:equatable/equatable.dart';
+enum UserRole { admin, peserta }
+class UserModel extends Equatable {
+  final String uid;
+  final String name;
+  final String email;
+  final UserRole role;
+  const UserModel({
+    required this.uid,
+    required this.name,
+    required this.email,
+    required this.role,
+  });
+  factory UserModel.fromJson(Map<String, dynamic> json) {
+    return UserModel(
+      uid: json['uid'] as String,
+      name: json['name'] as String,
+      email: json['email'] as String,
+      role: _parseRole(json['role'] as String?),
+    );
+  }
+  Map<String, dynamic> toJson() {
+    return {'uid': uid, 'name': name, 'email': email, 'role': role.name};
+  }
+  static UserRole _parseRole(String? roleStr) {
+    if (roleStr == 'admin') return UserRole.admin;
+    return UserRole.peserta; // Default fallback
+  }
+  @override
+  List<Object?> get props => [uid, name, email, role];
+}
+</file>
+
+<file path="lib/models/user_saving_model.dart">
+import 'package:equatable/equatable.dart';
+enum SavingStatus { active, completed }
+class UserSavingModel extends Equatable {
+  final String id;
+  final String userId;
+  final String targetId;
+  final double currentBalance;
+  final SavingStatus status;
+  final String namaPengkurban;
+  final String binBinti;
+  const UserSavingModel({
+    required this.id,
+    required this.userId,
+    required this.targetId,
+    required this.currentBalance,
+    required this.status,
+    required this.namaPengkurban,
+    required this.binBinti,
+  });
+  factory UserSavingModel.fromJson(Map<String, dynamic> json) {
+    return UserSavingModel(
+      id: json['id'] as String,
+      userId: json['user_id'] as String,
+      targetId: json['target_id'] as String,
+      currentBalance: (json['current_balance'] as num).toDouble(),
+      status: _parseStatus(json['status'] as String?),
+      namaPengkurban: json['nama_pengkurban'] as String? ?? '',
+      binBinti: json['bin_binti'] as String? ?? '',
+    );
+  }
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'user_id': userId,
+      'target_id': targetId,
+      'current_balance': currentBalance,
+      'status': status.name,
+      'nama_pengkurban': namaPengkurban,
+      'bin_binti': binBinti,
+    };
+  }
+  static SavingStatus _parseStatus(String? statusStr) {
+    if (statusStr == 'completed') return SavingStatus.completed;
+    return SavingStatus.active;
+  }
+  @override
+  List<Object?> get props => [
+    id,
+    userId,
+    targetId,
+    currentBalance,
+    status,
+    namaPengkurban,
+    binBinti,
+  ];
+}
+</file>
+
+<file path="lib/pages/admin/admin_dashboard_page.dart">
+import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:intl/intl.dart';
+import 'package:qurban_ku/models/notification_model.dart.dart';
+import 'package:qurban_ku/models/transaction_model.dart';
+import 'package:qurban_ku/pages/admin/admin_history_page.dart';
+import 'package:qurban_ku/pages/admin/admin_tabungan_peserta_page.dart';
+import 'package:qurban_ku/pages/notifications_page.dart';
+import 'package:qurban_ku/services/savings_service.dart';
+import '../../blocs/admin/admin_bloc.dart';
+import '../../blocs/admin/admin_event.dart';
+import '../../blocs/admin/admin_state.dart';
+import '../../blocs/auth/auth_bloc.dart';
+import '../../blocs/auth/auth_event.dart';
+import '../../utils/currency_formatter.dart';
+import 'admin_target_page.dart';
+class AdminDashboardPage extends StatefulWidget {
+  const AdminDashboardPage({super.key});
+  @override
+  State<AdminDashboardPage> createState() => _AdminDashboardPageState();
+}
+class _AdminDashboardPageState extends State<AdminDashboardPage> {
+  int _currentIndex = 0;
+  // Daftar judul AppBar sesuai tab
+  final List<String> _titles = [
+    'Verifikasi Setoran',
+    'Target Kurban',
+    'Riwayat & Export',
+    'Tabungan Peserta', // <-- TAMBAHAN
+  ];
+  void _showTransactionDetailDialog(BuildContext context, TransactionModel tx) {
+    final dateFormatted = DateFormat('dd MMM yyyy, HH:mm').format(tx.createdAt);
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => Padding(
+        padding: const EdgeInsets.all(24.0),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Detail Setoran',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+            ),
+            const Divider(height: 24),
+            _buildDetailRow('Nama Pengkurban', tx.namaPengkurban),
+            _buildDetailRow('Bin / Binti', tx.binBinti),
+            _buildDetailRow('Tanggal Setor', dateFormatted),
+            _buildDetailRow('Nominal', CurrencyFormatter.toRupiah(tx.amount)),
+            const SizedBox(height: 16),
+            const Text(
+              'Bukti Transfer:',
+              style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey),
+            ),
+            const SizedBox(height: 8),
+            GestureDetector(
+              onTap: () => _showImageDialog(context, tx.evidenceUrl),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: Image.network(
+                  tx.evidenceUrl,
+                  height: 200,
+                  width: double.infinity,
+                  fit: BoxFit.cover,
+                ),
+              ),
+            ),
+            const SizedBox(height: 24),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Tutup'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+  Widget _buildDetailRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12.0),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 130,
+            child: Text(
+              label,
+              style: const TextStyle(
+                fontWeight: FontWeight.bold,
+                color: Colors.grey,
+              ),
+            ),
+          ),
+          const Text(': '),
+          Expanded(
+            child: Text(
+              value,
+              style: const TextStyle(fontWeight: FontWeight.w600),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(_titles[_currentIndex]),
+        actions: [
+          StreamBuilder<List<NotificationModel>>(
+            stream: context.read<SavingsService>().getNotificationsStream(
+              'admin',
+            ),
+            builder: (context, snapshot) {
+              final unreadCount =
+                  snapshot.data?.where((n) => !n.isRead).length ?? 0;
+              return Stack(
+                alignment: Alignment.center,
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.notifications),
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) =>
+                              const NotificationsPage(targetUser: 'admin'),
+                        ),
+                      );
+                    },
+                  ),
+                  if (unreadCount > 0)
+                    Positioned(
+                      right: 8,
+                      top: 8,
+                      child: Container(
+                        padding: const EdgeInsets.all(2),
+                        decoration: BoxDecoration(
+                          color: Colors.red,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        constraints: const BoxConstraints(
+                          minWidth: 16,
+                          minHeight: 16,
+                        ),
+                        child: Text(
+                          '$unreadCount',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
+                    ),
+                ],
+              );
+            },
+          ),
+          IconButton(
+            icon: const Icon(Icons.logout),
+            onPressed: () =>
+                context.read<AuthBloc>().add(AuthLogoutRequested()),
+          ),
+        ],
+      ),
+      // Tampilkan halaman berdasarkan index
+      body: IndexedStack(
+        index: _currentIndex,
+        children: [
+          _buildPendingTab(context),
+          const AdminTargetPage(),
+          const AdminHistoryPage(),
+          const AdminTabunganPesertaPage(), // <-- UBAH 2: Tambahkan halaman ke stack
+        ],
+      ),
+      bottomNavigationBar: BottomNavigationBar(
+        currentIndex: _currentIndex,
+        type: BottomNavigationBarType.fixed,
+        onTap: (index) => setState(() => _currentIndex = index),
+        items: const [
+          BottomNavigationBarItem(
+            icon: Icon(Icons.fact_check),
+            label: 'Verifikasi',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.track_changes),
+            label: 'Target',
+          ),
+          BottomNavigationBarItem(icon: Icon(Icons.history), label: 'Riwayat'),
+          BottomNavigationBarItem(icon: Icon(Icons.people), label: 'Peserta'),
+        ],
+      ),
+    );
+  }
+  // ==========================================
+  // UI UNTUK TAB VERIFIKASI PENDING
+  // ==========================================
+  Widget _buildPendingTab(BuildContext context) {
+    return BlocConsumer<AdminBloc, AdminState>(
+      listener: (context, state) {
+        if (state is AdminActionSuccess) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(state.message),
+              backgroundColor: Colors.green,
+            ),
+          );
+        } else if (state is AdminError) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(state.message), backgroundColor: Colors.red),
+          );
+        }
+      },
+      buildWhen: (previous, current) =>
+          current is AdminLoaded ||
+          current is AdminLoading ||
+          current is AdminInitial,
+      builder: (context, state) {
+        if (state is AdminLoading || state is AdminInitial)
+          return const Center(child: CircularProgressIndicator());
+        if (state is AdminLoaded) {
+          if (state.pendingTransactions.isEmpty) {
+            return const Center(
+              child: Text(
+                'Tidak ada transaksi yang menunggu verifikasi.',
+                style: TextStyle(color: Colors.grey),
+              ),
+            );
+          }
+          return ListView.builder(
+            padding: const EdgeInsets.all(16),
+            itemCount: state.pendingTransactions.length,
+            itemBuilder: (context, index) {
+              final tx = state.pendingTransactions[index];
+              final dateFormatted = DateFormat(
+                'dd MMM yyyy, HH:mm',
+              ).format(tx.createdAt);
+              return Card(
+                margin: const EdgeInsets.only(bottom: 16),
+                elevation: 2,
+                clipBehavior: Clip.antiAlias, // Agar InkWell tidak keluar batas
+                child: InkWell(
+                  onTap: () => _showTransactionDetailDialog(
+                    context,
+                    tx,
+                  ), // Fungsi klik detail
+                  child: Padding(
+                    padding: const EdgeInsets.all(16.0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Expanded(
+                              child: Text(
+                                tx.namaPengkurban,
+                                style: const TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            Text(
+                              dateFormatted,
+                              style: const TextStyle(
+                                color: Colors.grey,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Bin/Binti: ${tx.binBinti}',
+                          style: const TextStyle(
+                            color: Colors.grey,
+                            fontSize: 13,
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          CurrencyFormatter.toRupiah(tx.amount),
+                          style: const TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.green, // Warna nominal disesuaikan
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        Row(
+                          children: [
+                            OutlinedButton.icon(
+                              onPressed: () =>
+                                  _showImageDialog(context, tx.evidenceUrl),
+                              icon: const Icon(Icons.image, size: 16),
+                              label: const Text('Bukti'),
+                            ),
+                            const Spacer(),
+                            IconButton(
+                              onPressed: () =>
+                                  _showRejectDialog(context, tx.id),
+                              icon: const Icon(Icons.cancel, color: Colors.red),
+                              tooltip: 'Tolak',
+                            ),
+                            IconButton(
+                              onPressed: () => context.read<AdminBloc>().add(
+                                ApproveTransactionRequested(tx),
+                              ),
+                              icon: const Icon(
+                                Icons.check_circle,
+                                color: Colors.green,
+                                size: 28,
+                              ),
+                              tooltip: 'Setujui',
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            },
+          );
+        }
+        return const SizedBox.shrink();
+      },
+    );
+  }
+  void _showImageDialog(BuildContext context, String imageUrl) {
+    showDialog(
+      context: context,
+      builder: (_) => Dialog(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [Image.network(imageUrl, fit: BoxFit.contain)],
+        ),
+      ),
+    );
+  }
+  void _showRejectDialog(BuildContext context, String transactionId) {
+    final noteController = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Tolak Transaksi'),
+        content: TextField(
+          controller: noteController,
+          decoration: const InputDecoration(
+            hintText: 'Alasan...',
+            border: OutlineInputBorder(),
+          ),
+          maxLines: 3,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Batal'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () {
+              if (noteController.text.trim().isNotEmpty) {
+                context.read<AdminBloc>().add(
+                  RejectTransactionRequested(
+                    transactionId: transactionId,
+                    adminNote: noteController.text.trim(),
+                  ),
+                );
+                Navigator.pop(dialogContext);
+              }
+            },
+            child: const Text('Tolak', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+  }
+}
+</file>
+
+<file path="lib/pages/admin/admin_detail_riwayat_tabungan_page.dart">
+import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:intl/intl.dart';
+import 'package:qurban_ku/models/transaction_model.dart';
+import '../../services/savings_service.dart';
+import '../../models/user_saving_model.dart';
+import '../../models/saving_target_model.dart';
+import '../../utils/currency_formatter.dart';
+class AdminDetailRiwayatTabunganPage extends StatelessWidget {
+  final String savingId;
+  final String namaPengkurban;
+  final String targetName;
+  const AdminDetailRiwayatTabunganPage({
+    super.key,
+    required this.savingId,
+    required this.namaPengkurban,
+    required this.targetName,
+  });
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(
+          'Setoran: $namaPengkurban',
+          style: const TextStyle(fontSize: 16),
+        ),
+      ),
+      body: Column(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(16),
+            width: double.infinity,
+            color: Colors.blueGrey.shade50,
+            child: Text(
+              'Target: $targetName',
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+          ),
+          Expanded(
+            child: StreamBuilder<List<TransactionModel>>(
+              stream: context
+                  .read<SavingsService>()
+                  .getTransactionsBySavingIdStream(savingId),
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting)
+                  return const Center(child: CircularProgressIndicator());
+                if (snapshot.hasError)
+                  return Center(child: Text('Error: ${snapshot.error}'));
+                final transactions = snapshot.data ?? [];
+                if (transactions.isEmpty)
+                  return const Center(child: Text('Tidak ada riwayat.'));
+                return ListView.builder(
+                  padding: const EdgeInsets.all(16),
+                  itemCount: transactions.length,
+                  itemBuilder: (context, index) {
+                    final tx = transactions[index];
+                    final dateFormatted = DateFormat(
+                      'dd MMM yyyy, HH:mm',
+                    ).format(tx.createdAt);
+                    Color statusColor = tx.status == TransactionStatus.approved
+                        ? Colors.green
+                        : tx.status == TransactionStatus.rejected
+                        ? Colors.red
+                        : Colors.orange;
+                    return Card(
+                      child: ListTile(
+                        title: Text(
+                          CurrencyFormatter.toRupiah(tx.amount),
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                        subtitle: Text(dateFormatted),
+                        trailing: Text(
+                          tx.status.name.toUpperCase(),
+                          style: TextStyle(
+                            color: statusColor,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+</file>
+
+<file path="lib/pages/admin/admin_history_page.dart">
+import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:intl/intl.dart';
+import 'package:printing/printing.dart';
+import '../../models/transaction_model.dart';
+import '../../services/savings_service.dart';
+import '../../utils/currency_formatter.dart';
+import '../../utils/pdf_generator.dart';
+class AdminHistoryPage extends StatefulWidget {
+  const AdminHistoryPage({super.key});
+  @override
+  State<AdminHistoryPage> createState() => _AdminHistoryPageState();
+}
+class _AdminHistoryPageState extends State<AdminHistoryPage> {
+  String _selectedStatus = 'Semua';
+  DateTime? _startDate;
+  DateTime? _endDate;
+  Future<void> _pickDateRange() async {
+    final DateTimeRange? picked = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime(2020),
+      lastDate: DateTime.now(),
+      initialDateRange: _startDate != null && _endDate != null
+          ? DateTimeRange(start: _startDate!, end: _endDate!)
+          : null,
+    );
+    if (picked != null) {
+      setState(() {
+        _startDate = picked.start;
+        // Set end date to the end of the day (23:59:59)
+        _endDate = DateTime(
+          picked.end.year,
+          picked.end.month,
+          picked.end.day,
+          23,
+          59,
+          59,
+        );
+      });
+    }
+  }
+  void _clearDateFilter() {
+    setState(() {
+      _startDate = null;
+      _endDate = null;
+    });
+  }
+  void _showTransactionDetailDialog(BuildContext context, TransactionModel tx) {
+    final dateFormatted = DateFormat('dd MMM yyyy, HH:mm').format(tx.createdAt);
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => Padding(
+        padding: const EdgeInsets.all(24.0),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Detail Riwayat Setoran',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+            ),
+            const Divider(height: 24),
+            _buildDetailRow('Nama Pengkurban', tx.namaPengkurban),
+            _buildDetailRow('Bin / Binti', tx.binBinti),
+            _buildDetailRow('Tanggal Setor', dateFormatted),
+            _buildDetailRow('Nominal', CurrencyFormatter.toRupiah(tx.amount)),
+            _buildDetailRow('Status', tx.status.name.toUpperCase()),
+            if (tx.status == TransactionStatus.rejected)
+              _buildDetailRow('Alasan Ditolak', tx.adminNote ?? '-'),
+            const SizedBox(height: 16),
+            const Text(
+              'Bukti Transfer:',
+              style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey),
+            ),
+            const SizedBox(height: 8),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: Image.network(
+                tx.evidenceUrl,
+                height: 200,
+                width: double.infinity,
+                fit: BoxFit.cover,
+              ),
+            ),
+            const SizedBox(height: 24),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Tutup'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+  Widget _buildDetailRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12.0),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 130,
+            child: Text(
+              label,
+              style: const TextStyle(
+                fontWeight: FontWeight.bold,
+                color: Colors.grey,
+              ),
+            ),
+          ),
+          const Text(': '),
+          Expanded(
+            child: Text(
+              value,
+              style: const TextStyle(fontWeight: FontWeight.w600),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<List<TransactionModel>>(
+      stream: context.read<SavingsService>().getAllTransactionsHistoryStream(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        if (snapshot.hasError) {
+          return Center(child: Text('Terjadi kesalahan: ${snapshot.error}'));
+        }
+        final allTransactions = snapshot.data ?? [];
+        // Terapkan Filter
+        final filteredTransactions = allTransactions.where((tx) {
+          // Filter Status
+          if (_selectedStatus == 'Approved' &&
+              tx.status != TransactionStatus.approved)
+            return false;
+          if (_selectedStatus == 'Rejected' &&
+              tx.status != TransactionStatus.rejected)
+            return false;
+          // Filter Tanggal
+          if (_startDate != null && _endDate != null) {
+            if (tx.createdAt.isBefore(_startDate!) ||
+                tx.createdAt.isAfter(_endDate!)) {
+              return false;
+            }
+          }
+          return true;
+        }).toList();
+        return Column(
+          children: [
+            // Bagian Filter Panel
+            Container(
+              padding: const EdgeInsets.all(16),
+              color: Colors.white,
+              child: Column(
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: DropdownButtonFormField<String>(
+                          decoration: const InputDecoration(
+                            labelText: 'Filter Status',
+                            border: OutlineInputBorder(),
+                            contentPadding: EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 8,
+                            ),
+                          ),
+                          value: _selectedStatus,
+                          items: ['Semua', 'Approved', 'Rejected'].map((
+                            String value,
+                          ) {
+                            return DropdownMenuItem<String>(
+                              value: value,
+                              child: Text(value),
+                            );
+                          }).toList(),
+                          onChanged: (newValue) {
+                            setState(() => _selectedStatus = newValue!);
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: _pickDateRange,
+                          icon: const Icon(Icons.calendar_today, size: 18),
+                          label: Text(
+                            _startDate != null
+                                ? '${DateFormat('dd/MM/yy').format(_startDate!)} - ${DateFormat('dd/MM/yy').format(_endDate!)}'
+                                : 'Pilih Rentang Tanggal',
+                          ),
+                        ),
+                      ),
+                      if (_startDate != null) ...[
+                        const SizedBox(width: 8),
+                        IconButton(
+                          onPressed: _clearDateFilter,
+                          icon: const Icon(Icons.clear, color: Colors.red),
+                          tooltip: 'Hapus Filter Tanggal',
+                        ),
+                      ],
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.blueGrey,
+                        foregroundColor: Colors.white,
+                      ),
+                      onPressed: filteredTransactions.isEmpty
+                          ? null
+                          : () async {
+                              final pdfBytes =
+                                  await PdfGenerator.generateReport(
+                                    transactions: filteredTransactions,
+                                    startDate: _startDate,
+                                    endDate: _endDate,
+                                    statusFilter: _selectedStatus,
+                                  );
+                              if (context.mounted) {
+                                // Menampilkan preview PDF dan opsi Print/Save
+                                await Printing.layoutPdf(
+                                  onLayout: (format) async => pdfBytes,
+                                  name:
+                                      'Laporan_Setoran_${DateFormat('ddMMyyyy').format(DateTime.now())}.pdf',
+                                );
+                              }
+                            },
+                      icon: const Icon(Icons.picture_as_pdf),
+                      label: const Text('Export ke PDF'),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1, thickness: 1),
+            // Bagian Daftar Transaksi
+            Expanded(
+              child: filteredTransactions.isEmpty
+                  ? const Center(child: Text('Tidak ada data sesuai filter.'))
+                  : ListView.builder(
+                      padding: const EdgeInsets.all(16),
+                      itemCount: filteredTransactions.length,
+                      itemBuilder: (context, index) {
+                        final tx = filteredTransactions[index];
+                        final isApproved =
+                            tx.status == TransactionStatus.approved;
+                        return Card(
+                          elevation: 1,
+                          margin: const EdgeInsets.only(bottom: 12),
+                          clipBehavior: Clip.antiAlias,
+                          child: InkWell(
+                            onTap: () =>
+                                _showTransactionDetailDialog(context, tx),
+                            child: Padding(
+                              padding: const EdgeInsets.all(16.0),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    mainAxisAlignment:
+                                        MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      Expanded(
+                                        child: Text(
+                                          tx.namaPengkurban,
+                                          style: const TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 16,
+                                          ),
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 8,
+                                          vertical: 4,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: isApproved
+                                              ? Colors.green.withOpacity(0.1)
+                                              : Colors.red.withOpacity(0.1),
+                                          borderRadius: BorderRadius.circular(
+                                            8,
+                                          ),
+                                        ),
+                                        child: Text(
+                                          tx.status.name.toUpperCase(),
+                                          style: TextStyle(
+                                            color: isApproved
+                                                ? Colors.green
+                                                : Colors.red,
+                                            fontSize: 10,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    'Bin/Binti: ${tx.binBinti}',
+                                    style: const TextStyle(
+                                      fontSize: 13,
+                                      color: Colors.grey,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 12),
+                                  Row(
+                                    mainAxisAlignment:
+                                        MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      Text(
+                                        CurrencyFormatter.toRupiah(tx.amount),
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 16,
+                                        ),
+                                      ),
+                                      Text(
+                                        DateFormat(
+                                          'dd MMM yyyy, HH:mm',
+                                        ).format(tx.createdAt),
+                                        style: const TextStyle(
+                                          fontSize: 12,
+                                          color: Colors.grey,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  if (!isApproved) ...[
+                                    const SizedBox(height: 8),
+                                    Text(
+                                      'Alasan: ${tx.adminNote}',
+                                      style: const TextStyle(
+                                        color: Colors.red,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+</file>
+
+<file path="lib/pages/admin/admin_tabungan_peserta_page.dart">
+import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:qurban_ku/pages/admin/admin_detail_riwayat_tabungan_page.dart';
+import '../../services/savings_service.dart';
+import '../../models/user_saving_model.dart';
+import '../../models/saving_target_model.dart';
+import '../../utils/currency_formatter.dart';
+class AdminTabunganPesertaPage extends StatefulWidget {
+  const AdminTabunganPesertaPage({super.key});
+  @override
+  State<AdminTabunganPesertaPage> createState() =>
+      _AdminTabunganPesertaPageState();
+}
+class _AdminTabunganPesertaPageState extends State<AdminTabunganPesertaPage> {
+  String _selectedFilter = 'Semua';
+  Future<List<Map<String, dynamic>>> _fetchData() async {
+    return await context.read<SavingsService>().getAllUserSavingsWithDetail();
+  }
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        // --- BAGIAN FILTER ---
+        Container(
+          padding: const EdgeInsets.all(16),
+          color: Colors.white,
+          child: DropdownButtonFormField<String>(
+            decoration: const InputDecoration(
+              labelText: 'Filter Status Tabungan',
+              border: OutlineInputBorder(),
+              contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            ),
+            value: _selectedFilter,
+            items: ['Semua', 'Sedang Proses', 'Lunas'].map((String value) {
+              return DropdownMenuItem<String>(value: value, child: Text(value));
+            }).toList(),
+            onChanged: (newValue) {
+              setState(() => _selectedFilter = newValue!);
+            },
+          ),
+        ),
+        const Divider(height: 1, thickness: 1),
+        // --- BAGIAN LIST DATA ---
+        Expanded(
+          // ✅ UBAH: Menggunakan StreamBuilder
+          child: StreamBuilder<List<Map<String, dynamic>>>(
+            stream: context
+                .read<SavingsService>()
+                .getAllUserSavingsWithDetailStream(),
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Center(child: CircularProgressIndicator());
+              }
+              if (snapshot.hasError) {
+                return Center(
+                  child: Text('Terjadi kesalahan: ${snapshot.error}'),
+                );
+              }
+              final allData = snapshot.data ?? [];
+              final filteredData = allData.where((item) {
+                final progress = item['progressPercentage'] as double;
+                if (_selectedFilter == 'Sedang Proses' && progress >= 100.0)
+                  return false;
+                if (_selectedFilter == 'Lunas' && progress < 100.0)
+                  return false;
+                return true;
+              }).toList();
+              if (filteredData.isEmpty) {
+                return const Center(
+                  child: Text('Tidak ada data peserta sesuai filter.'),
+                );
+              }
+              return ListView.builder(
+                padding: const EdgeInsets.all(16),
+                itemCount: filteredData.length,
+                itemBuilder: (context, index) {
+                  final item = filteredData[index];
+                  final saving = item['saving'] as UserSavingModel;
+                  final target = item['target'] as SavingTargetModel;
+                  final progress = item['progressPercentage'] as double;
+                  final isLunas = progress >= 100.0;
+                  return Card(
+                    elevation: 2,
+                    margin: const EdgeInsets.only(bottom: 12),
+                    clipBehavior: Clip.antiAlias,
+                    child: InkWell(
+                      onTap: () {
+                        // Membuka daftar transaksi khusus untuk tabungan ini
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) =>
+                                AdminDetailRiwayatTabunganPage(
+                                  savingId: saving.id,
+                                  namaPengkurban: saving.namaPengkurban,
+                                  targetName: target.animalType,
+                                ),
+                          ),
+                        );
+                      },
+                      child: Padding(
+                        padding: const EdgeInsets.all(16.0),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          // ... Sisa kode Column tetap sama seperti sebelumnya (Row nama pengkurban, bin/binti, linear progress, dll) ...
+                          children: [
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    saving.namaPengkurban,
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 16,
+                                    ),
+                                  ),
+                                ),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 4,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: isLunas
+                                        ? Colors.green.withOpacity(0.1)
+                                        : Colors.orange.withOpacity(0.1),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Text(
+                                    isLunas ? 'LUNAS' : 'PROSES',
+                                    style: TextStyle(
+                                      color: isLunas
+                                          ? Colors.green
+                                          : Colors.orange,
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              'Bin/Binti: ${saving.binBinti}',
+                              style: const TextStyle(
+                                color: Colors.grey,
+                                fontSize: 13,
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            Text(
+                              'Target Kurban: ${target.animalType}',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            LinearProgressIndicator(
+                              value: progress / 100,
+                              backgroundColor: Colors.grey[300],
+                              color: isLunas
+                                  ? Colors.green
+                                  : Theme.of(context).colorScheme.primary,
+                            ),
+                            const SizedBox(height: 8),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text(
+                                  CurrencyFormatter.toRupiah(
+                                    saving.currentBalance,
+                                  ),
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                Text(
+                                  '${progress.toStringAsFixed(1)}%',
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+}
+</file>
+
+<file path="lib/pages/admin/admin_target_page.dart">
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import '../../models/saving_target_model.dart';
+import '../../services/savings_service.dart';
+import '../../utils/currency_formatter.dart';
+class AdminTargetPage extends StatelessWidget {
+  const AdminTargetPage({super.key});
+  void _showTargetForm(
+    BuildContext context, {
+    SavingTargetModel? existingTarget,
+  }) {
+    final nameController = TextEditingController(
+      text: existingTarget?.animalType,
+    );
+    final amountController = TextEditingController();
+    if (existingTarget != null) {
+      amountController.text = existingTarget.targetAmount.toInt().toString();
+    }
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (bottomSheetContext) => Padding(
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.of(bottomSheetContext).viewInsets.bottom,
+          left: 16,
+          right: 16,
+          top: 24,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              existingTarget == null ? 'Tambah Target Baru' : 'Edit Target',
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: nameController,
+              decoration: const InputDecoration(
+                labelText: 'Nama Hewan / Keterangan',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: amountController,
+              keyboardType: TextInputType.number,
+              inputFormatters: [CurrencyInputFormatter()],
+              decoration: const InputDecoration(
+                labelText: 'Target Nominal (Rp)',
+                border: OutlineInputBorder(),
+                prefixText: 'Rp ',
+              ),
+            ),
+            const SizedBox(height: 24),
+            ElevatedButton(
+              onPressed: () async {
+                if (nameController.text.isNotEmpty &&
+                    amountController.text.isNotEmpty) {
+                  final cleanText = amountController.text.replaceAll(
+                    RegExp(r'[^0-9]'),
+                    '',
+                  );
+                  final amount = double.tryParse(cleanText) ?? 0.0;
+                  final newTarget = SavingTargetModel(
+                    id: existingTarget?.id ?? '',
+                    animalType: nameController.text,
+                    targetAmount: amount,
+                  );
+                  await context.read<SavingsService>().saveTarget(newTarget);
+                  if (context.mounted) Navigator.pop(bottomSheetContext);
+                }
+              },
+              child: const Text('Simpan'),
+            ),
+            const SizedBox(height: 24),
+          ],
+        ),
+      ),
+    );
+  }
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: StreamBuilder<List<SavingTargetModel>>(
+        stream: context.read<SavingsService>().getTargetsStream(),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting)
+            return const Center(child: CircularProgressIndicator());
+          if (snapshot.hasError)
+            return Center(child: Text('Error: ${snapshot.error}'));
+          final targets = snapshot.data ?? [];
+          if (targets.isEmpty)
+            return const Center(child: Text('Belum ada target kurban.'));
+          return ListView.builder(
+            padding: const EdgeInsets.all(16),
+            itemCount: targets.length,
+            itemBuilder: (context, index) {
+              final target = targets[index];
+              return Card(
+                elevation: 2,
+                child: ListTile(
+                  title: Text(
+                    target.animalType,
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  subtitle: Text(
+                    CurrencyFormatter.toRupiah(target.targetAmount),
+                  ),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.edit, color: Colors.blue),
+                        onPressed: () =>
+                            _showTargetForm(context, existingTarget: target),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.delete, color: Colors.red),
+                        onPressed: () async {
+                          await context.read<SavingsService>().deleteTarget(
+                            target.id,
+                          );
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          );
+        },
+      ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: () => _showTargetForm(context),
+        child: const Icon(Icons.add),
+      ),
+    );
+  }
+}
+</file>
+
+<file path="lib/pages/admin/admin_transaction_detail_page.dart">
+import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:intl/intl.dart';
+import 'package:qurban_ku/blocs/auth/auth_bloc.dart';
+import 'package:qurban_ku/blocs/auth/auth_state.dart';
+import 'package:qurban_ku/models/transaction_model.dart';
+import 'package:qurban_ku/models/user_model.dart';
+import '../../blocs/admin/admin_bloc.dart';
+import '../../blocs/admin/admin_event.dart';
+import '../../blocs/admin/admin_state.dart';
+import '../../services/savings_service.dart';
+import '../../utils/currency_formatter.dart';
+class AdminTransactionDetailPage extends StatefulWidget {
+  final String transactionId;
+  const AdminTransactionDetailPage({super.key, required this.transactionId});
+  @override
+  State<AdminTransactionDetailPage> createState() =>
+      _AdminTransactionDetailPageState();
+}
+class _AdminTransactionDetailPageState
+    extends State<AdminTransactionDetailPage> {
+  TransactionModel? transaction;
+  bool isLoading = true;
+  @override
+  void initState() {
+    super.initState();
+    _loadData();
+  }
+  Future<void> _loadData() async {
+    try {
+      final tx = await context.read<SavingsService>().getTransactionById(
+        widget.transactionId,
+      );
+      setState(() {
+        transaction = tx;
+        isLoading = false;
+      });
+    } catch (e) {
+      setState(() => isLoading = false);
+    }
+  }
+  void _showRejectDialog(BuildContext context, String transactionId) {
+    final noteController = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Tolak Transaksi'),
+        content: TextField(
+          controller: noteController,
+          decoration: const InputDecoration(
+            hintText: 'Alasan...',
+            border: OutlineInputBorder(),
+          ),
+          maxLines: 3,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Batal'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () {
+              if (noteController.text.trim().isNotEmpty) {
+                context.read<AdminBloc>().add(
+                  RejectTransactionRequested(
+                    transactionId: transactionId,
+                    adminNote: noteController.text.trim(),
+                  ),
+                );
+                Navigator.pop(dialogContext); // Tutup dialog
+              }
+            },
+            child: const Text('Tolak', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+  }
+  @override
+  Widget build(BuildContext context) {
+    final authState = context.read<AuthBloc>().state;
+    final bool isAdmin =
+        (authState is AuthAuthenticated &&
+        authState.user.role == UserRole.admin);
+    return Scaffold(
+      appBar: AppBar(title: const Text('Verifikasi Setoran')),
+      body: BlocConsumer<AdminBloc, AdminState>(
+        listener: (context, state) {
+          if (state is AdminActionSuccess) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(state.message),
+                backgroundColor: Colors.green,
+              ),
+            );
+            Navigator.pop(
+              context,
+            ); // Kembali ke list notif setelah sukses approve/reject
+          }
+        },
+        builder: (context, state) {
+          if (isLoading || state is AdminActionProcessing) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          if (transaction == null)
+            return const Center(child: Text('Data tidak ditemukan'));
+          final tx = transaction!;
+          final dateFormatted = DateFormat(
+            'dd MMM yyyy, HH:mm',
+          ).format(tx.createdAt);
+          return SingleChildScrollView(
+            padding: const EdgeInsets.all(24.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _buildRow('Status', tx.status.name.toUpperCase()),
+                _buildRow('Nama Pengkurban', tx.namaPengkurban),
+                // ... (lanjutan layout gambar dll) ...
+                const SizedBox(height: 24),
+                // ✅ UBAH: Cek selain tx.status == pending, cek juga isAdmin
+                if (tx.status == TransactionStatus.pending && isAdmin)
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: Colors.red,
+                            side: const BorderSide(color: Colors.red),
+                          ),
+                          onPressed: () => _showRejectDialog(context, tx.id),
+                          icon: const Icon(Icons.cancel),
+                          label: const Text('Tolak'),
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: ElevatedButton.icon(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.green,
+                            foregroundColor: Colors.white,
+                          ),
+                          onPressed: () => context.read<AdminBloc>().add(
+                            ApproveTransactionRequested(tx),
+                          ),
+                          icon: const Icon(Icons.check_circle),
+                          label: const Text('Setujui'),
+                        ),
+                      ),
+                    ],
+                  ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+  Widget _buildRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 130,
+            child: Text(
+              label,
+              style: const TextStyle(
+                fontWeight: FontWeight.bold,
+                color: Colors.grey,
+              ),
+            ),
+          ),
+          const Text(': '),
+          Expanded(
+            child: Text(
+              value,
+              style: const TextStyle(fontWeight: FontWeight.w600),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+</file>
+
+<file path="lib/pages/auth/login_page.dart">
+import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:qurban_ku/pages/auth/register_page.dart';
+import 'package:qurban_ku/utils/database_seeder.dart';
+import '../../blocs/auth/auth_bloc.dart';
+import '../../blocs/auth/auth_event.dart';
+import '../../blocs/auth/auth_state.dart';
+class LoginPage extends StatefulWidget {
+  const LoginPage({super.key});
+  @override
+  State<LoginPage> createState() => _LoginPageState();
+}
+class _LoginPageState extends State<LoginPage> {
+  final _emailController = TextEditingController();
+  final _passwordController = TextEditingController();
+  final _formKey = GlobalKey<FormState>();
+  @override
+  void initState() {
+    _emailController.text = "peserta@qurbanku.com";
+    _passwordController.text = "password123";
+    // TODO: implement initState
+    super.initState();
+  }
+  @override
+  void dispose() {
+    _emailController.dispose();
+    _passwordController.dispose();
+    super.dispose();
+  }
+  void _onLogin() {
+    if (_formKey.currentState!.validate()) {
+      context.read<AuthBloc>().add(
+        AuthLoginRequested(
+          email: _emailController.text.trim(),
+          password: _passwordController.text.trim(),
+        ),
+      );
+    }
+  }
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24.0),
+            child: BlocConsumer<AuthBloc, AuthState>(
+              // Hanya rebuild UI saat Loading atau balik ke Unauthenticated
+              // Jangan rebuild saat AuthError agar form tidak reset
+              buildWhen: (previous, current) {
+                // Tetap rebuild saat AuthError supaya isLoading bisa false
+                if (current is AuthAuthenticated) return false;
+                return true; // ← rebuild untuk Loading, Error, Unauthenticated, Initial
+              },
+              listener: (context, state) {
+                if (state is AuthError) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(state.message),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                }
+              },
+              builder: (context, state) {
+                final isLoading = state is AuthLoading;
+                return Form(
+                  key: _formKey,
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      const Icon(Icons.mosque, size: 80, color: Colors.green),
+                      const SizedBox(height: 24),
+                      const Text(
+                        'Tabungan Kurban',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 32),
+                      TextFormField(
+                        controller: _emailController,
+                        decoration: const InputDecoration(
+                          labelText: 'Email',
+                          border: OutlineInputBorder(),
+                        ),
+                        keyboardType: TextInputType.emailAddress,
+                        enabled: !isLoading,
+                        validator: (value) => value != null && value.isNotEmpty
+                            ? null
+                            : 'Email wajib diisi',
+                      ),
+                      const SizedBox(height: 16),
+                      TextFormField(
+                        controller: _passwordController,
+                        decoration: const InputDecoration(
+                          labelText: 'Password',
+                          border: OutlineInputBorder(),
+                        ),
+                        obscureText: true,
+                        enabled: !isLoading,
+                        validator: (value) => value != null && value.isNotEmpty
+                            ? null
+                            : 'Password wajib diisi',
+                      ),
+                      const SizedBox(height: 24),
+                      ElevatedButton(
+                        onPressed: isLoading ? null : _onLogin,
+                        style: ElevatedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                        ),
+                        child: isLoading
+                            ? const SizedBox(
+                                height: 20,
+                                width: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Text('Masuk'),
+                      ),
+                      TextButton(
+                        onPressed: isLoading
+                            ? null
+                            : () {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => const RegisterPage(),
+                                  ),
+                                );
+                              },
+                        child: const Text('Belum punya akun? Daftar di sini'),
+                      ),
+                      TextButton(
+                        onPressed: () =>
+                            DatabaseSeeder.seedInitialData(context),
+                        child: const Text(
+                          'Jalankan Seeder (Buat Data Dummy)',
+                          style: TextStyle(color: Colors.grey),
+                        ),
+                      ),
+                      TextButton(
+                        onPressed: () =>
+                            DatabaseSeeder.clearTransactionData(context),
+                        child: const Text(
+                          'Hapus Riwayat Tabungan',
+                          style: TextStyle(
+                            color: Colors.red,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+</file>
+
+<file path="lib/pages/auth/register_page.dart">
+import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import '../../blocs/auth/auth_bloc.dart';
+import '../../blocs/auth/auth_event.dart';
+import '../../blocs/auth/auth_state.dart';
+class RegisterPage extends StatefulWidget {
+  const RegisterPage({super.key});
+  @override
+  State<RegisterPage> createState() => _RegisterPageState();
+}
+class _RegisterPageState extends State<RegisterPage> {
+  final _nameController = TextEditingController();
+  final _emailController = TextEditingController();
+  final _passwordController = TextEditingController();
+  final _formKey = GlobalKey<FormState>();
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _emailController.dispose();
+    _passwordController.dispose();
+    super.dispose();
+  }
+  void _onRegister() {
+    if (_formKey.currentState!.validate()) {
+      context.read<AuthBloc>().add(
+        AuthRegisterRequested(
+          name: _nameController.text.trim(),
+          email: _emailController.text.trim(),
+          password: _passwordController.text.trim(),
+        ),
+      );
+    }
+  }
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Daftar Akun')),
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24.0),
+            child: BlocConsumer<AuthBloc, AuthState>(
+              listener: (context, state) {
+                if (state is AuthError) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(state.message),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                } else if (state is AuthAuthenticated) {
+                  // Kembali ke halaman root (Dashboard) saat registrasi berhasil
+                  Navigator.of(context).popUntil((route) => route.isFirst);
+                }
+              },
+              builder: (context, state) {
+                final isLoading = state is AuthLoading;
+                return Form(
+                  key: _formKey,
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      const Icon(
+                        Icons.person_add,
+                        size: 80,
+                        color: Colors.green,
+                      ),
+                      const SizedBox(height: 24),
+                      const Text(
+                        'Buat Akun Peserta Baru',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 32),
+                      TextFormField(
+                        controller: _nameController,
+                        decoration: const InputDecoration(
+                          labelText: 'Nama Lengkap',
+                          border: OutlineInputBorder(),
+                        ),
+                        enabled: !isLoading,
+                        validator: (value) => value != null && value.isNotEmpty
+                            ? null
+                            : 'Nama wajib diisi',
+                      ),
+                      const SizedBox(height: 16),
+                      TextFormField(
+                        controller: _emailController,
+                        decoration: const InputDecoration(
+                          labelText: 'Email',
+                          border: OutlineInputBorder(),
+                        ),
+                        keyboardType: TextInputType.emailAddress,
+                        enabled: !isLoading,
+                        validator: (value) {
+                          if (value == null || value.isEmpty)
+                            return 'Email wajib diisi';
+                          if (!value.contains('@')) return 'Format email salah';
+                          return null;
+                        },
+                      ),
+                      const SizedBox(height: 16),
+                      TextFormField(
+                        controller: _passwordController,
+                        decoration: const InputDecoration(
+                          labelText: 'Password (min. 6 karakter)',
+                          border: OutlineInputBorder(),
+                        ),
+                        obscureText: true,
+                        enabled: !isLoading,
+                        validator: (value) {
+                          if (value == null || value.isEmpty)
+                            return 'Password wajib diisi';
+                          if (value.length < 6)
+                            return 'Password minimal 6 karakter';
+                          return null;
+                        },
+                      ),
+                      const SizedBox(height: 24),
+                      ElevatedButton(
+                        onPressed: isLoading ? null : _onRegister,
+                        style: ElevatedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          backgroundColor: Colors.green,
+                          foregroundColor: Colors.white,
+                        ),
+                        child: isLoading
+                            ? const SizedBox(
+                                height: 20,
+                                width: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white,
+                                ),
+                              )
+                            : const Text('Daftar'),
+                      ),
+                      const SizedBox(height: 16),
+                      TextButton(
+                        onPressed: isLoading
+                            ? null
+                            : () => Navigator.pop(context),
+                        child: const Text('Sudah punya akun? Masuk di sini'),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+</file>
+
+<file path="lib/pages/notifications_page.dart">
+import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:intl/intl.dart';
+import 'package:qurban_ku/models/notification_model.dart.dart';
+import 'package:qurban_ku/pages/admin/admin_transaction_detail_page.dart';
+import '../services/savings_service.dart';
+class NotificationsPage extends StatelessWidget {
+  final String targetUser; // Bisa berisi ID User atau tulisan 'admin'
+  const NotificationsPage({super.key, required this.targetUser});
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text(
+          'Notifikasi',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
+        // ✅ TAMBAHAN: Tombol Read All
+        actions: [
+          IconButton(
+            tooltip: 'Tandai semua sudah dibaca',
+            icon: const Icon(Icons.mark_email_read),
+            onPressed: () {
+              context.read<SavingsService>().markAllNotificationsAsRead(
+                targetUser,
+              );
+            },
+          ),
+        ],
+      ),
+      body: StreamBuilder<List<NotificationModel>>(
+        stream: context.read<SavingsService>().getNotificationsStream(
+          targetUser,
+        ),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          if (snapshot.hasError) {
+            return Center(child: Text('Error: ${snapshot.error}'));
+          }
+          final notifications = snapshot.data ?? [];
+          if (notifications.isEmpty) {
+            return const Center(
+              child: Text(
+                'Belum ada notifikasi.',
+                style: TextStyle(color: Colors.grey),
+              ),
+            );
+          }
+          return ListView.builder(
+            itemCount: notifications.length,
+            itemBuilder: (context, index) {
+              final notif = notifications[index];
+              final isUnread = !notif.isRead;
+              return ListTile(
+                tileColor: isUnread ? Colors.green.withOpacity(0.05) : null,
+                leading: CircleAvatar(
+                  backgroundColor: isUnread ? Colors.green : Colors.grey,
+                  child: Icon(
+                    isUnread ? Icons.notifications_active : Icons.notifications,
+                    color: Colors.white,
+                  ),
+                ),
+                title: Text(
+                  notif.title,
+                  style: TextStyle(
+                    fontWeight: isUnread ? FontWeight.bold : FontWeight.normal,
+                  ),
+                ),
+                subtitle: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const SizedBox(height: 4),
+                    Text(notif.message),
+                    const SizedBox(height: 4),
+                    Text(
+                      DateFormat('dd MMM yyyy, HH:mm').format(notif.createdAt),
+                      style: const TextStyle(fontSize: 11, color: Colors.grey),
+                    ),
+                  ],
+                ),
+                onTap: () {
+                  if (isUnread) {
+                    context.read<SavingsService>().markNotificationAsRead(
+                      notif.id,
+                    );
+                  }
+                  // ✅ UBAH: Admin DAN Peserta kini bisa mengeklik notif menuju ke detail setoran
+                  if (notif.referenceId != null) {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => AdminTransactionDetailPage(
+                          transactionId: notif.referenceId!,
+                        ),
+                      ),
+                    );
+                  }
+                },
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
+}
+</file>
+
+<file path="lib/pages/peserta/peserta_dashboard_page.dart">
+import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:qurban_ku/models/notification_model.dart.dart';
+import 'package:qurban_ku/models/user_saving_model.dart';
+import 'package:qurban_ku/pages/notifications_page.dart';
+import '../../blocs/auth/auth_bloc.dart';
+import '../../blocs/auth/auth_event.dart';
+import '../../blocs/auth/auth_state.dart';
+import '../../blocs/savings/savings_bloc.dart';
+import '../../blocs/savings/savings_event.dart';
+import '../../blocs/savings/savings_state.dart';
+import '../../models/saving_target_model.dart';
+import '../../services/savings_service.dart';
+import '../../utils/currency_formatter.dart';
+import 'riwayat_setoran_page.dart';
+import 'setor_tabungan_page.dart';
+class PesertaDashboardPage extends StatefulWidget {
+  const PesertaDashboardPage({super.key});
+  @override
+  State<PesertaDashboardPage> createState() => _PesertaDashboardPageState();
+}
+class _PesertaDashboardPageState extends State<PesertaDashboardPage> {
+  @override
+  void initState() {
+    super.initState();
+    _loadData();
+  }
+  void _loadData() {
+    final authState = context.read<AuthBloc>().state;
+    if (authState is AuthAuthenticated) {
+      context.read<SavingsBloc>().add(
+        LoadSavingsData(userId: authState.user.uid),
+      );
+    }
+  }
+  void _showAddTargetSheet(BuildContext context, String userId) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (sheetContext) => _AddTargetBottomSheet(userId: userId),
+    );
+  }
+  @override
+  Widget build(BuildContext context) {
+    final authState = context.read<AuthBloc>().state;
+    final userId = authState is AuthAuthenticated ? authState.user.uid : '';
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text(
+          'Tabungan Saya',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
+        actions: [
+          StreamBuilder<List<NotificationModel>>(
+            stream: context.read<SavingsService>().getNotificationsStream(
+              userId,
+            ),
+            builder: (context, snapshot) {
+              final unreadCount =
+                  snapshot.data?.where((n) => !n.isRead).length ?? 0;
+              return Stack(
+                alignment: Alignment.center,
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.notifications),
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) =>
+                              NotificationsPage(targetUser: userId),
+                        ),
+                      );
+                    },
+                  ),
+                  if (unreadCount > 0)
+                    Positioned(
+                      right: 8,
+                      top: 8,
+                      child: Container(
+                        padding: const EdgeInsets.all(2),
+                        decoration: BoxDecoration(
+                          color: Colors.red,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        constraints: const BoxConstraints(
+                          minWidth: 16,
+                          minHeight: 16,
+                        ),
+                        child: Text(
+                          '$unreadCount',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
+                    ),
+                ],
+              );
+            },
+          ),
+          IconButton(
+            icon: const Icon(Icons.history),
+            tooltip: 'Riwayat Semua Setoran',
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => const RiwayatSetoranPage(),
+              ),
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.logout),
+            onPressed: () =>
+                context.read<AuthBloc>().add(AuthLogoutRequested()),
+          ),
+        ],
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () => _showAddTargetSheet(context, userId),
+        icon: const Icon(Icons.add),
+        label: const Text('Tambah Target'),
+      ),
+      body: BlocBuilder<SavingsBloc, SavingsState>(
+        builder: (context, state) {
+          if (state is SavingsLoading || state is SavingsInitial)
+            return const Center(child: CircularProgressIndicator());
+          if (state is SavingsError)
+            return Center(
+              child: Text(
+                state.message,
+                style: const TextStyle(color: Colors.red),
+              ),
+            );
+          if (state is SavingsEmpty)
+            return const Center(
+              child: Text(
+                'Anda belum memiliki target tabungan.\nSilakan tekan tombol Tambah Target di bawah.',
+                textAlign: TextAlign.center,
+              ),
+            );
+          if (state is SavingsLoaded) {
+            return RefreshIndicator(
+              onRefresh: () async => _loadData(),
+              child: ListView.builder(
+                padding: const EdgeInsets.all(16),
+                itemCount: state.savingsList.length,
+                itemBuilder: (context, index) {
+                  final item = state.savingsList[index];
+                  return Card(
+                    elevation: 3,
+                    margin: const EdgeInsets.only(bottom: 20),
+                    clipBehavior: Clip.antiAlias,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: InkWell(
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => DetailRiwayatTargetPage(
+                              savingId: item.userSaving.id,
+                              targetName: item.targetDetail.animalType,
+                              isLunas: item.progressPercentage >= 100.0,
+                            ),
+                          ),
+                        );
+                      },
+                      child: Padding(
+                        padding: const EdgeInsets.all(16.0),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              item.targetDetail.animalType.toUpperCase(),
+                              style: const TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              'Target: ${CurrencyFormatter.toRupiah(item.targetDetail.targetAmount)}',
+                              style: const TextStyle(color: Colors.grey),
+                            ),
+                            const SizedBox(height: 16),
+                            LinearProgressIndicator(
+                              value: item.progressPercentage / 100,
+                              minHeight: 12,
+                              borderRadius: BorderRadius.circular(6),
+                              backgroundColor: Colors.grey[300],
+                              color: Theme.of(context).colorScheme.primary,
+                            ),
+                            const SizedBox(height: 8),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text(
+                                  CurrencyFormatter.toRupiah(
+                                    item.userSaving.currentBalance,
+                                  ),
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                Text(
+                                  '${item.progressPercentage.toStringAsFixed(1)}%',
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 16),
+                            Builder(
+                              builder: (context) {
+                                final isLunas =
+                                    item.progressPercentage >= 100.0;
+                                final isCompleted =
+                                    item.userSaving.status ==
+                                    SavingStatus.completed;
+                                return SizedBox(
+                                  width: double.infinity,
+                                  child: isCompleted
+                                      ? ElevatedButton.icon(
+                                          onPressed: null,
+                                          icon: const Icon(
+                                            Icons.verified,
+                                            color: Colors.grey,
+                                          ),
+                                          label: const Text(
+                                            'Telah Diserahkan',
+                                            style: TextStyle(
+                                              color: Colors.grey,
+                                            ),
+                                          ),
+                                        )
+                                      : isLunas
+                                      ? ElevatedButton.icon(
+                                          onPressed: () {
+                                            showDialog(
+                                              context: context,
+                                              builder: (_) => AlertDialog(
+                                                title: const Text(
+                                                  'Alhamdulillah, Lunas!',
+                                                ),
+                                                content: const Text(
+                                                  'Tabungan kurban Anda untuk target ini sudah mencapai 100%. '
+                                                  'Silakan serahkan tabungan secara resmi ke panitia kurban.',
+                                                ),
+                                                actions: [
+                                                  TextButton(
+                                                    onPressed: () =>
+                                                        Navigator.pop(context),
+                                                    child: const Text('Batal'),
+                                                  ),
+                                                  ElevatedButton(
+                                                    style:
+                                                        ElevatedButton.styleFrom(
+                                                          backgroundColor:
+                                                              Colors.green,
+                                                        ),
+                                                    onPressed: () async {
+                                                      await context
+                                                          .read<
+                                                            SavingsService
+                                                          >()
+                                                          .completeSaving(
+                                                            item.userSaving.id,
+                                                          );
+                                                      if (context.mounted) {
+                                                        Navigator.pop(context);
+                                                        _loadData();
+                                                        ScaffoldMessenger.of(
+                                                          context,
+                                                        ).showSnackBar(
+                                                          const SnackBar(
+                                                            content: Text(
+                                                              'Tabungan berhasil diserahkan!',
+                                                            ),
+                                                            backgroundColor:
+                                                                Colors.green,
+                                                          ),
+                                                        );
+                                                      }
+                                                    },
+                                                    child: const Text(
+                                                      'Serahkan Sekarang',
+                                                      style: TextStyle(
+                                                        color: Colors.white,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            );
+                                          },
+                                          icon: const Icon(
+                                            Icons.check_circle,
+                                            color: Colors.white,
+                                          ),
+                                          label: const Text(
+                                            'Serahkan Tabungan',
+                                            style: TextStyle(
+                                              color: Colors.white,
+                                            ),
+                                          ),
+                                          style: ElevatedButton.styleFrom(
+                                            backgroundColor: Colors.green,
+                                          ),
+                                        )
+                                      : ElevatedButton.icon(
+                                          onPressed: () {
+                                            final maxAmount =
+                                                item.targetDetail.targetAmount -
+                                                item.userSaving.currentBalance;
+                                            Navigator.push(
+                                              context,
+                                              MaterialPageRoute(
+                                                builder: (context) =>
+                                                    SetorTabunganPage(
+                                                      savingId:
+                                                          item.userSaving.id,
+                                                      maxAmount: maxAmount,
+                                                    ),
+                                              ),
+                                            );
+                                          },
+                                          icon: const Icon(Icons.payment),
+                                          label: const Text(
+                                            'Setor untuk Target Ini',
+                                          ),
+                                        ),
+                                );
+                              },
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            );
+          }
+          return const SizedBox.shrink();
+        },
+      ),
+    );
+  }
+}
+// ============================================================
+// WIDGET TERPISAH UNTUK BOTTOM SHEET
+// ============================================================
+class _AddTargetBottomSheet extends StatefulWidget {
+  final String userId;
+  const _AddTargetBottomSheet({required this.userId});
+  @override
+  State<_AddTargetBottomSheet> createState() => _AddTargetBottomSheetState();
+}
+class _AddTargetBottomSheetState extends State<_AddTargetBottomSheet> {
+  SavingTargetModel? selectedTarget;
+  final namaController = TextEditingController();
+  final binBintiController = TextEditingController();
+  final formKey = GlobalKey<FormState>();
+  @override
+  void dispose() {
+    namaController.dispose();
+    binBintiController.dispose();
+    super.dispose();
+  }
+  @override
+  Widget build(BuildContext context) {
+    if (selectedTarget == null) {
+      return Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              'Pilih Target Kurban',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 16),
+            StreamBuilder<List<SavingTargetModel>>(
+              stream: context.read<SavingsService>().getTargetsStream(),
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting)
+                  return const SizedBox(
+                    height: 100,
+                    child: Center(child: CircularProgressIndicator()),
+                  );
+                final targets = snapshot.data ?? [];
+                if (targets.isEmpty)
+                  return const SizedBox(
+                    height: 100,
+                    child: Center(
+                      child: Text('Admin belum membuat target kurban.'),
+                    ),
+                  );
+                return ListView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  itemCount: targets.length,
+                  itemBuilder: (context, index) {
+                    final target = targets[index];
+                    return Card(
+                      elevation: 1,
+                      child: ListTile(
+                        title: Text(
+                          target.animalType,
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                        subtitle: Text(
+                          CurrencyFormatter.toRupiah(target.targetAmount),
+                        ),
+                        trailing: ElevatedButton(
+                          onPressed: () {
+                            setState(() => selectedTarget = target);
+                          },
+                          child: const Text('Gabung'),
+                        ),
+                      ),
+                    );
+                  },
+                );
+              },
+            ),
+            const SizedBox(height: 16),
+          ],
+        ),
+      );
+    }
+    // Step 2: Form isi data pengkurban
+    return SingleChildScrollView(
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.of(context).viewInsets.bottom + 24,
+        left: 16,
+        right: 16,
+        top: 24,
+      ),
+      child: Form(
+        key: formKey,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.arrow_back),
+                  onPressed: () => setState(() => selectedTarget = null),
+                ),
+                const Text(
+                  'Data Pengkurban',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Target: ${selectedTarget!.animalType}',
+              style: const TextStyle(fontWeight: FontWeight.w500),
+            ),
+            const SizedBox(height: 16),
+            TextFormField(
+              controller: namaController,
+              decoration: const InputDecoration(
+                labelText: 'Nama Pengkurban',
+                border: OutlineInputBorder(),
+              ),
+              validator: (val) =>
+                  val == null || val.isEmpty ? 'Wajib diisi' : null,
+            ),
+            const SizedBox(height: 16),
+            TextFormField(
+              controller: binBintiController,
+              decoration: const InputDecoration(
+                labelText: 'Bin / Binti',
+                border: OutlineInputBorder(),
+              ),
+              validator: (val) =>
+                  val == null || val.isEmpty ? 'Wajib diisi' : null,
+            ),
+            const SizedBox(height: 24),
+            ElevatedButton(
+              onPressed: () async {
+                if (formKey.currentState!.validate()) {
+                  try {
+                    final savingsService = context.read<SavingsService>();
+                    await savingsService.joinTarget(
+                      widget.userId,
+                      selectedTarget!.id,
+                      namaController.text.trim(),
+                      binBintiController.text.trim(),
+                    );
+                    if (context.mounted) {
+                      Navigator.pop(context);
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Target berhasil ditambahkan!'),
+                          backgroundColor: Colors.green,
+                        ),
+                      );
+                    }
+                  } catch (e) {
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text('Gagal bergabung: $e'),
+                          backgroundColor: Colors.red,
+                          duration: const Duration(seconds: 5),
+                        ),
+                      );
+                    }
+                  }
+                }
+              },
+              style: ElevatedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 16),
+              ),
+              child: const Text('Simpan & Gabung'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+</file>
+
+<file path="lib/pages/peserta/riwayat_setoran_page.dart">
+import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:intl/intl.dart';
+import '../../blocs/savings/savings_bloc.dart';
+import '../../blocs/savings/savings_state.dart';
+import '../../models/transaction_model.dart';
+import '../../services/savings_service.dart';
+import '../../utils/currency_formatter.dart';
+import 'setor_tabungan_page.dart';
+class RiwayatSetoranPage extends StatelessWidget {
+  const RiwayatSetoranPage({super.key});
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Riwayat Setoran (Per Target)')),
+      body: BlocBuilder<SavingsBloc, SavingsState>(
+        builder: (context, state) {
+          if (state is SavingsLoading || state is SavingsInitial) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          if (state is SavingsEmpty) {
+            return const Center(
+              child: Text(
+                'Belum ada target tabungan.',
+                style: TextStyle(color: Colors.grey),
+              ),
+            );
+          }
+          if (state is SavingsLoaded) {
+            // Grouping Lunas dan Proses
+            final lunasList = state.savingsList
+                .where((item) => item.progressPercentage >= 100)
+                .toList();
+            final prosesList = state.savingsList
+                .where((item) => item.progressPercentage < 100)
+                .toList();
+            return ListView(
+              padding: const EdgeInsets.all(16),
+              children: [
+                if (prosesList.isNotEmpty) ...[
+                  const Text(
+                    'Sedang Proses',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.orange,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  ...prosesList.map(
+                    (item) => _buildTargetCard(context, item, isLunas: false),
+                  ),
+                  const SizedBox(height: 24),
+                ],
+                if (lunasList.isNotEmpty) ...[
+                  const Text(
+                    'Sudah Lunas',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.green,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  ...lunasList.map(
+                    (item) => _buildTargetCard(context, item, isLunas: true),
+                  ),
+                ],
+              ],
+            );
+          }
+          return const SizedBox.shrink();
+        },
+      ),
+    );
+  }
+  Widget _buildTargetCard(
+    BuildContext context,
+    SavingItem item, {
+    required bool isLunas,
+  }) {
+    return Card(
+      elevation: 2,
+      margin: const EdgeInsets.only(bottom: 12),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: () {
+          // Navigasi ke detail riwayat per ID Sapi
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => DetailRiwayatTargetPage(
+                savingId: item.userSaving.id,
+                targetName: item.targetDetail.animalType,
+                isLunas: isLunas,
+              ),
+            ),
+          );
+        },
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Expanded(
+                    child: Text(
+                      item.targetDetail.animalType,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                      ),
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: isLunas
+                          ? Colors.green.withOpacity(0.1)
+                          : Colors.orange.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      isLunas ? 'LUNAS' : 'PROSES',
+                      style: TextStyle(
+                        color: isLunas ? Colors.green : Colors.orange,
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'A.n: ${item.userSaving.namaPengkurban}',
+                style: const TextStyle(color: Colors.grey),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Total Terkumpul: ${CurrencyFormatter.toRupiah(item.userSaving.currentBalance)}',
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Ketuk untuk melihat riwayat setoran >>',
+                style: TextStyle(color: Colors.blue, fontSize: 12),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+// Halaman baru untuk melihat list transaksi di dalam 1 target sapi
+class DetailRiwayatTargetPage extends StatelessWidget {
+  final String savingId;
+  final String targetName;
+  final bool isLunas;
+  const DetailRiwayatTargetPage({
+    super.key,
+    required this.savingId,
+    required this.targetName,
+    required this.isLunas,
+  });
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(
+          'Detail: $targetName',
+          style: const TextStyle(fontSize: 16),
+        ),
+      ),
+      body: Column(
+        children: [
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(16),
+            color: isLunas ? Colors.green.shade100 : Colors.orange.shade100,
+            child: Text(
+              isLunas
+                  ? 'Status: TABUNGAN TELAH LUNAS'
+                  : 'Status: TABUNGAN SEDANG PROSES',
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                color: isLunas ? Colors.green.shade800 : Colors.orange.shade800,
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ),
+          Expanded(
+            child: StreamBuilder<List<TransactionModel>>(
+              stream: context
+                  .read<SavingsService>()
+                  .getTransactionsBySavingIdStream(savingId),
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting)
+                  return const Center(child: CircularProgressIndicator());
+                if (snapshot.hasError)
+                  return Center(
+                    child: Text('Terjadi kesalahan: ${snapshot.error}'),
+                  );
+                final transactions = snapshot.data ?? [];
+                if (transactions.isEmpty)
+                  return const Center(
+                    child: Text('Belum ada riwayat setoran.'),
+                  );
+                return ListView.builder(
+                  padding: const EdgeInsets.all(16),
+                  itemCount: transactions.length,
+                  itemBuilder: (context, index) {
+                    final tx = transactions[index];
+                    final dateFormatted = DateFormat(
+                      'dd MMM yyyy, HH:mm',
+                    ).format(tx.createdAt);
+                    Color statusColor = tx.status == TransactionStatus.approved
+                        ? Colors.green
+                        : tx.status == TransactionStatus.rejected
+                        ? Colors.red
+                        : Colors.orange;
+                    return Card(
+                      margin: const EdgeInsets.only(bottom: 12),
+                      child: ListTile(
+                        title: Text(
+                          CurrencyFormatter.toRupiah(tx.amount),
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                        subtitle: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              dateFormatted,
+                              style: const TextStyle(fontSize: 12),
+                            ),
+                            if (tx.status == TransactionStatus.rejected)
+                              Text(
+                                'Ditolak: ${tx.adminNote ?? "-"}',
+                                style: const TextStyle(
+                                  color: Colors.red,
+                                  fontSize: 12,
+                                ),
+                              ),
+                          ],
+                        ),
+                        trailing: Text(
+                          tx.status.name.toUpperCase(),
+                          style: TextStyle(
+                            color: statusColor,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+</file>
+
+<file path="lib/pages/peserta/setor_tabungan_page.dart">
+import 'dart:io';
+import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:flutter/services.dart';
+import 'package:intl/intl.dart';
+import '../../blocs/auth/auth_bloc.dart';
+import '../../blocs/auth/auth_state.dart';
+import '../../blocs/transaction/transaction_bloc.dart';
+import '../../blocs/transaction/transaction_event.dart';
+import '../../blocs/transaction/transaction_state.dart';
+import '../../models/transaction_model.dart';
+import '../../services/savings_service.dart';
+import '../../services/storage_service.dart';
+import '../../utils/currency_formatter.dart';
+class SetorTabunganPage extends StatelessWidget {
+  final TransactionModel? existingTransaction;
+  final String? savingId;
+  final double? maxAmount; // TAMBAHAN
+  const SetorTabunganPage({
+    super.key,
+    this.existingTransaction,
+    this.savingId,
+    this.maxAmount,
+  });
+  @override
+  Widget build(BuildContext context) {
+    return BlocProvider(
+      create: (context) => TransactionBloc(
+        storageService: context.read<StorageService>(),
+        savingsService: context.read<SavingsService>(),
+      ),
+      child: _SetorTabunganForm(
+        existingTransaction: existingTransaction,
+        savingId: savingId,
+        maxAmount: maxAmount, // TAMBAHAN
+      ),
+    );
+  }
+}
+class _SetorTabunganForm extends StatefulWidget {
+  final TransactionModel? existingTransaction;
+  final String? savingId;
+  final double? maxAmount; // TAMBAHAN
+  const _SetorTabunganForm({
+    this.existingTransaction,
+    this.savingId,
+    this.maxAmount,
+  });
+  @override
+  State<_SetorTabunganForm> createState() => _SetorTabunganFormState();
+}
+class _SetorTabunganFormState extends State<_SetorTabunganForm> {
+  final _amountController = TextEditingController();
+  final _formKey = GlobalKey<FormState>();
+  File? _selectedImage;
+  final ImagePicker _picker = ImagePicker();
+  bool get _isEditMode => widget.existingTransaction != null;
+  @override
+  void initState() {
+    super.initState();
+    if (_isEditMode) {
+      final formatter = NumberFormat.currency(
+        locale: 'id_ID',
+        symbol: '',
+        decimalDigits: 0,
+      );
+      _amountController.text = formatter
+          .format(widget.existingTransaction!.amount)
+          .trim();
+    }
+  }
+  @override
+  void dispose() {
+    _amountController.dispose();
+    super.dispose();
+  }
+  Future<void> _pickImage() async {
+    final XFile? image = await _picker.pickImage(
+      source: ImageSource.gallery,
+      imageQuality: 80,
+    );
+    if (image != null) {
+      setState(() {
+        _selectedImage = File(image.path);
+      });
+    }
+  }
+  void _submit() {
+    final hasValidImage = _selectedImage != null || _isEditMode;
+    if (_formKey.currentState!.validate() && hasValidImage) {
+      final authState = context.read<AuthBloc>().state;
+      if (authState is AuthAuthenticated) {
+        final cleanText = _amountController.text.replaceAll(
+          RegExp(r'[^0-9]'),
+          '',
+        );
+        final amount = double.tryParse(cleanText) ?? 0.0;
+        if (_isEditMode) {
+          context.read<TransactionBloc>().add(
+            UpdateTransaction(
+              transactionId: widget.existingTransaction!.id,
+              amount: amount,
+              newEvidenceImage: _selectedImage,
+              currentEvidenceUrl: widget.existingTransaction!.evidenceUrl,
+              userId: authState.user.uid,
+            ),
+          );
+        } else {
+          context.read<TransactionBloc>().add(
+            SubmitTransaction(
+              amount: amount,
+              evidenceImage: _selectedImage!,
+              userId: authState.user.uid,
+              savingId: widget.savingId!, // <--- BARU (Kirim ID tabungannya)
+            ),
+          );
+        }
+      }
+    } else if (!hasValidImage) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Harap unggah bukti transfer'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(_isEditMode ? 'Revisi Setoran' : 'Setor Tabungan'),
+      ),
+      body: BlocConsumer<TransactionBloc, TransactionState>(
+        listener: (context, state) {
+          if (state is TransactionSuccess) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  _isEditMode
+                      ? 'Revisi berhasil dikirim. Menunggu verifikasi.'
+                      : 'Transaksi berhasil dikirim. Menunggu verifikasi.',
+                ),
+                backgroundColor: Colors.green,
+              ),
+            );
+            Navigator.pop(context);
+          } else if (state is TransactionError) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(state.message),
+                backgroundColor: Colors.red,
+              ),
+            );
+          }
+        },
+        builder: (context, state) {
+          final isLoading = state is TransactionSubmitting;
+          return Align(
+            alignment: Alignment.topCenter,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 600),
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(16.0),
+                child: Form(
+                  key: _formKey,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      if (_isEditMode) ...[
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Colors.red.shade50,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.red.shade200),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                'Alasan Penolakan Admin:',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.red,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                widget.existingTransaction!.adminNote ??
+                                    'Tidak ada catatan',
+                                style: const TextStyle(color: Colors.red),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 24),
+                      ],
+                      TextFormField(
+                        controller: _amountController,
+                        keyboardType: TextInputType.number,
+                        enabled: !isLoading,
+                        inputFormatters: [CurrencyInputFormatter()],
+                        decoration: const InputDecoration(
+                          labelText: 'Nominal Setoran (Rp)',
+                          border: OutlineInputBorder(),
+                          prefixText: 'Rp ',
+                        ),
+                        validator: (value) {
+                          if (value == null || value.isEmpty)
+                            return 'Nominal wajib diisi';
+                          // Hapus semua karakter selain angka
+                          final cleanText = value.replaceAll(
+                            RegExp(r'[^0-9]'),
+                            '',
+                          );
+                          final amount = double.tryParse(cleanText) ?? 0.0;
+                          // TAMBAHAN: Validasi max amount
+                          if (widget.maxAmount != null &&
+                              amount > widget.maxAmount!) {
+                            return 'Maksimal setoran Rp ${CurrencyFormatter.toRupiah(widget.maxAmount!)}';
+                          }
+                          return null;
+                        },
+                      ),
+                      const SizedBox(height: 24),
+                      const Text(
+                        'Bukti Transfer',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 8),
+                      GestureDetector(
+                        onTap: isLoading ? null : _pickImage,
+                        child: Container(
+                          height: 250,
+                          decoration: BoxDecoration(
+                            color: Colors.grey[200],
+                            border: Border.all(color: Colors.grey),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(12),
+                            child: _selectedImage != null
+                                ? Image.file(_selectedImage!, fit: BoxFit.cover)
+                                : _isEditMode
+                                ? Stack(
+                                    fit: StackFit.expand,
+                                    children: [
+                                      Image.network(
+                                        widget.existingTransaction!.evidenceUrl,
+                                        fit: BoxFit.cover,
+                                      ),
+                                      Container(color: Colors.black38),
+                                      const Center(
+                                        child: Text(
+                                          'Ketuk untuk ganti foto',
+                                          style: TextStyle(
+                                            color: Colors.white,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  )
+                                : const Column(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Icon(
+                                        Icons.add_a_photo,
+                                        size: 48,
+                                        color: Colors.grey,
+                                      ),
+                                      SizedBox(height: 8),
+                                      Text(
+                                        'Ketuk untuk memilih foto',
+                                        style: TextStyle(color: Colors.grey),
+                                      ),
+                                    ],
+                                  ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 32),
+                      isLoading
+                          ? const Center(child: CircularProgressIndicator())
+                          : ElevatedButton(
+                              onPressed: _submit,
+                              style: ElevatedButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 16,
+                                ),
+                              ),
+                              child: Text(
+                                _isEditMode
+                                    ? 'Kirim Revisi Setoran'
+                                    : 'Kirim Bukti Setoran',
+                              ),
+                            ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+</file>
+
+<file path="lib/services/auth_service.dart">
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
+import '../models/user_model.dart';
+class AuthService {
+  final FirebaseAuth _auth;
+  final FirebaseFirestore _firestore;
+  AuthService({FirebaseAuth? auth, FirebaseFirestore? firestore})
+    : _auth = auth ?? FirebaseAuth.instance,
+      _firestore = firestore ?? FirebaseFirestore.instance;
+  Stream<User?> get authStateChanges => _auth.authStateChanges();
+  Future<UserModel> signInWithEmailPassword(
+    String email,
+    String password,
+  ) async {
+    try {
+      final UserCredential credential = await _auth.signInWithEmailAndPassword(
+        email: email,
+        password: password,
+      );
+      final User? firebaseUser = credential.user;
+      if (firebaseUser == null) {
+        throw Exception('Login gagal: User tidak ditemukan.');
+      }
+      final DocumentSnapshot doc = await _firestore
+          .collection('users')
+          .doc(firebaseUser.uid)
+          .get();
+      if (!doc.exists || doc.data() == null) {
+        throw Exception('Data pengguna tidak ditemukan di database.');
+      }
+      final data = doc.data() as Map<String, dynamic>;
+      data['uid'] = firebaseUser.uid;
+      // ====================================================
+      // 2. KODE YANG DITAMBAH: Ambil & Simpan FCM Token
+      // ====================================================
+      try {
+        String? fcmToken = await FirebaseMessaging.instance.getToken();
+        if (fcmToken != null) {
+          await _firestore.collection('users').doc(firebaseUser.uid).update({
+            'fcm_token': fcmToken,
+          });
+        }
+      } catch (e) {
+        // Abaikan jika gagal agar proses login utama tidak terganggu
+        print('Gagal menyimpan FCM Token: $e');
+      }
+      // ====================================================
+      return UserModel.fromJson(data);
+    } on FirebaseAuthException catch (e) {
+      throw Exception(_handleAuthError(e.code));
+    } catch (e) {
+      throw Exception(e.toString());
+    }
+  }
+  Future<void> signOut() async {
+    await _auth.signOut();
+  }
+  String _handleAuthError(String errorCode) {
+    switch (errorCode) {
+      case 'user-not-found':
+        return 'Email tidak terdaftar.';
+      case 'wrong-password':
+        return 'Password salah.';
+      case 'invalid-credential': // ← TAMBAH INI
+        return 'Email atau password salah.';
+      case 'invalid-email':
+        return 'Format email tidak valid.';
+      case 'user-disabled':
+        return 'Akun ini telah dinonaktifkan.';
+      case 'email-already-in-use':
+        return 'Email ini sudah digunakan oleh akun lain.';
+      case 'weak-password':
+        return 'Password terlalu lemah, minimal 6 karakter.';
+      default:
+        return 'Terjadi kesalahan otentikasi: $errorCode';
+    }
+  }
+  Future<UserModel> registerWithEmailPassword(
+    String name,
+    String email,
+    String password,
+  ) async {
+    try {
+      final UserCredential credential = await _auth
+          .createUserWithEmailAndPassword(email: email, password: password);
+      final User? firebaseUser = credential.user;
+      if (firebaseUser == null) {
+        throw Exception('Registrasi gagal: User tidak dapat dibuat.');
+      }
+      // Buat data UserModel dengan role default 'peserta'
+      final userModel = UserModel(
+        uid: firebaseUser.uid,
+        name: name,
+        email: email,
+        role: UserRole.peserta,
+      );
+      // Simpan data profil ke collection 'users'
+      await _firestore
+          .collection('users')
+          .doc(firebaseUser.uid)
+          .set(userModel.toJson());
+      // Simpan FCM Token jika ada (agar notifikasi bisa masuk ke user baru)
+      try {
+        String? fcmToken = await FirebaseMessaging.instance.getToken();
+        if (fcmToken != null) {
+          await _firestore.collection('users').doc(firebaseUser.uid).update({
+            'fcm_token': fcmToken,
+          });
+        }
+      } catch (e) {
+        print('Gagal menyimpan FCM Token saat register: $e');
+      }
+      return userModel;
+    } on FirebaseAuthException catch (e) {
+      throw Exception(_handleAuthError(e.code));
+    } catch (e) {
+      throw Exception(e.toString());
+    }
+  }
+}
+</file>
+
+<file path="lib/services/fcm_service.dart">
+import 'package:googleapis_auth/auth_io.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
+class FcmService {
+  // ISI DENGAN KONTEN FILE JSON SERVICE ACCOUNT KAMU
+  static const _serviceAccountJson = {
+    "type": "service_account",
+    "project_id": "qurban-ku-xxxxx",
+    "private_key":
+        "-----BEGIN PRIVATE KEY-----\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQDh...\n-----END PRIVATE KEY-----\n",
+    "client_email":
+        "firebase-adminsdk-xxxxx@qurban-ku-xxxxx.iam.gserviceaccount.com",
+    // ... copy semua isinya di sini
+  };
+  static const _scopes = ['https://www.googleapis.com/auth/firebase.messaging'];
+  static Future<void> sendNotification({
+    required String deviceToken,
+    required String title,
+    required String body,
+  }) async {
+    try {
+      // 1. Dapatkan akses token dari Google
+      final client = await clientViaServiceAccount(
+        ServiceAccountCredentials.fromJson(_serviceAccountJson),
+        _scopes,
+      );
+      final projectId = _serviceAccountJson['project_id'];
+      final url =
+          'https://fcm.googleapis.com/v1/projects/$projectId/messages:send';
+      // 2. Buat Body Notifikasi
+      final message = {
+        'message': {
+          'token': deviceToken,
+          'notification': {'title': title, 'body': body},
+          'data': {
+            'click_action': 'FLUTTER_NOTIFICATION_CLICK',
+            'status': 'done',
+          },
+        },
+      };
+      // 3. Kirim ke FCM
+      final response = await client.post(
+        Uri.parse(url),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(message),
+      );
+      if (response.statusCode == 200) {
+        print('Notifikasi berhasil dikirim!');
+      } else {
+        print('Gagal kirim: ${response.body}');
+      }
+      client.close();
+    } catch (e) {
+      print('Error FCM: $e');
+    }
+  }
+}
+</file>
+
+<file path="lib/services/savings_service.dart">
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:qurban_ku/models/notification_model.dart.dart';
+import 'package:qurban_ku/services/fcm_service.dart';
+import 'package:qurban_ku/utils/currency_formatter.dart';
+import '../models/saving_target_model.dart';
+import '../models/user_saving_model.dart';
+import '../models/transaction_model.dart';
+class SavingsService {
+  final FirebaseFirestore _firestore;
+  SavingsService({FirebaseFirestore? firestore})
+    : _firestore = firestore ?? FirebaseFirestore.instance;
+  Stream<UserSavingModel?> getUserSavingStream(String userId) {
+    return _firestore
+        .collection('user_savings')
+        .where('user_id', isEqualTo: userId)
+        .limit(1)
+        .snapshots()
+        .map((snapshot) {
+          if (snapshot.docs.isEmpty) return null;
+          final data = snapshot.docs.first.data();
+          data['id'] = snapshot.docs.first.id;
+          return UserSavingModel.fromJson(data);
+        });
+  }
+  Future<SavingTargetModel> getTargetDetail(String targetId) async {
+    final doc = await _firestore
+        .collection('saving_targets')
+        .doc(targetId)
+        .get();
+    if (!doc.exists) throw Exception('Target tabungan tidak ditemukan');
+    final data = doc.data()!;
+    data['id'] = doc.id;
+    return SavingTargetModel.fromJson(data);
+  }
+  Future<void> submitTransaction(TransactionModel transaction) async {
+    try {
+      await _firestore
+          .collection('transactions')
+          .doc(transaction.id)
+          .set(transaction.toJson());
+      await _sendNotification(
+        'admin',
+        'Setoran Baru!',
+        'Ada setoran baru dari ${transaction.namaPengkurban} sebesar ${CurrencyFormatter.toRupiah(transaction.amount)}. Mohon segera diverifikasi.',
+        referenceId: transaction.id,
+      );
+    } catch (e) {
+      throw Exception('Gagal mengirim transaksi: ${e.toString()}');
+    }
+  }
+  Stream<List<TransactionModel>> getTransactionsStream(String userId) {
+    return _firestore
+        .collection('transactions')
+        .where('user_id', isEqualTo: userId)
+        .orderBy('created_at', descending: true)
+        .snapshots()
+        .map((snapshot) {
+          return snapshot.docs.map((doc) {
+            final data = doc.data();
+            data['id'] = doc.id;
+            return TransactionModel.fromJson(data);
+          }).toList();
+        });
+  }
+  Stream<List<TransactionModel>> getPendingTransactionsStream() {
+    return _firestore
+        .collection('transactions')
+        .where('status', isEqualTo: TransactionStatus.pending.name)
+        .orderBy('created_at', descending: true)
+        .snapshots()
+        .map((snapshot) {
+          return snapshot.docs.map((doc) {
+            final data = doc.data();
+            data['id'] = doc.id;
+            return TransactionModel.fromJson(data);
+          }).toList();
+        });
+  }
+  Future<void> approveTransaction(TransactionModel transaction) async {
+    final savingDocRef = _firestore
+        .collection('user_savings')
+        .doc(transaction.savingId);
+    final transactionDocRef = _firestore
+        .collection('transactions')
+        .doc(transaction.id);
+    bool isFullyPaid = false;
+    String targetAnimalName = '';
+    await _firestore.runTransaction((tx) async {
+      final savingSnapshot = await tx.get(savingDocRef);
+      if (!savingSnapshot.exists) {
+        throw Exception('Tabungan tidak valid atau sudah dihapus');
+      }
+      final currentBalance =
+          (savingSnapshot.data()?['current_balance'] as num?)?.toDouble() ??
+          0.0;
+      final newBalance = currentBalance + transaction.amount;
+      final targetId = savingSnapshot.data()!['target_id'] as String;
+      final targetSnapshot = await tx.get(
+        _firestore.collection('saving_targets').doc(targetId),
+      );
+      if (targetSnapshot.exists) {
+        final targetAmount = (targetSnapshot.data()!['target_amount'] as num)
+            .toDouble();
+        targetAnimalName = targetSnapshot.data()!['animal_type'] as String;
+        if (newBalance >= targetAmount) {
+          isFullyPaid = true;
+        }
+      }
+      tx.update(transactionDocRef, {'status': TransactionStatus.approved.name});
+      tx.update(savingDocRef, {
+        'current_balance': newBalance,
+        'updated_at': Timestamp.now(),
+      });
+    });
+    await _sendNotification(
+      transaction.userId,
+      'Setoran Diterima',
+      'Setoran Anda sebesar ${CurrencyFormatter.toRupiah(transaction.amount)} untuk atas nama ${transaction.namaPengkurban} telah diverifikasi.',
+      referenceId: transaction.id,
+    );
+    if (isFullyPaid) {
+      await _sendNotification(
+        transaction.userId,
+        'Alhamdulillah, Lunas!',
+        'Tabungan kurban untuk target $targetAnimalName (A.n. ${transaction.namaPengkurban}) sudah mencapai 100%.',
+      );
+      await _sendNotification(
+        'admin',
+        'Target 100% Tercapai',
+        'Tabungan kurban peserta A.n. ${transaction.namaPengkurban} untuk target $targetAnimalName telah lunas.',
+      );
+    }
+  }
+  Future<void> rejectTransaction(String transactionId, String adminNote) async {
+    await _firestore.collection('transactions').doc(transactionId).update({
+      'status': TransactionStatus.rejected.name,
+      'admin_note': adminNote,
+    });
+    final txDoc = await _firestore
+        .collection('transactions')
+        .doc(transactionId)
+        .get();
+    if (txDoc.exists) {
+      final userId = txDoc.data()!['user_id'] as String;
+      final nama = txDoc.data()!['nama_pengkurban'] as String? ?? '-';
+      await _sendNotification(
+        userId,
+        'Setoran Ditolak',
+        'Mohon maaf, setoran Anda (A.n. $nama) ditolak. Alasan: $adminNote. Silakan perbaiki setoran Anda.',
+      );
+    }
+  }
+  Future<void> updateTransaction({
+    required String transactionId,
+    required double amount,
+    required String evidenceUrl,
+  }) async {
+    await _firestore.collection('transactions').doc(transactionId).update({
+      'amount': amount,
+      'evidence_url': evidenceUrl,
+      'status': TransactionStatus.pending.name,
+      'admin_note': FieldValue.delete(),
+      'created_at': Timestamp.now(),
+    });
+  }
+  Stream<List<SavingTargetModel>> getTargetsStream() {
+    return _firestore.collection('saving_targets').snapshots().map((snapshot) {
+      return snapshot.docs.map((doc) {
+        final data = doc.data();
+        data['id'] = doc.id;
+        return SavingTargetModel.fromJson(data);
+      }).toList();
+    });
+  }
+  Future<void> saveTarget(SavingTargetModel target) async {
+    final docRef = target.id.isEmpty
+        ? _firestore.collection('saving_targets').doc()
+        : _firestore.collection('saving_targets').doc(target.id);
+    final data = target.toJson();
+    data['id'] = docRef.id;
+    await docRef.set(data);
+  }
+  Future<void> deleteTarget(String targetId) async {
+    await _firestore.collection('saving_targets').doc(targetId).delete();
+  }
+  Stream<List<TransactionModel>> getAllTransactionsHistoryStream() {
+    return _firestore
+        .collection('transactions')
+        .where(
+          'status',
+          whereIn: [
+            TransactionStatus.approved.name,
+            TransactionStatus.rejected.name,
+          ],
+        )
+        .orderBy('created_at', descending: true)
+        .snapshots()
+        .map((snapshot) {
+          return snapshot.docs.map((doc) {
+            final data = doc.data();
+            data['id'] = doc.id;
+            return TransactionModel.fromJson(data);
+          }).toList();
+        });
+  }
+  Future<void> joinTarget(
+    String userId,
+    String targetId,
+    String namaPengkurban,
+    String binBinti,
+  ) async {
+    final savingRef = _firestore.collection('user_savings').doc();
+    await savingRef
+        .set({
+          'id': savingRef.id,
+          'user_id': userId,
+          'target_id': targetId,
+          'current_balance': 0.0,
+          'status': 'active',
+          'nama_pengkurban': namaPengkurban,
+          'bin_binti': binBinti,
+          'updated_at': Timestamp.now(),
+        })
+        .timeout(
+          const Duration(seconds: 10),
+          onTimeout: () {
+            throw Exception('Koneksi ke Firestore terputus (Timeout).');
+          },
+        );
+  }
+  Stream<List<UserSavingModel>> getUserSavingsStream(String userId) {
+    return _firestore
+        .collection('user_savings')
+        .where('user_id', isEqualTo: userId)
+        .snapshots()
+        .map((snapshot) {
+          final docs = snapshot.docs.toList();
+          docs.sort((a, b) {
+            final dataA = a.data();
+            final dataB = b.data();
+            final dateA =
+                (dataA['updated_at'] as Timestamp?)?.toDate() ?? DateTime(2000);
+            final dateB =
+                (dataB['updated_at'] as Timestamp?)?.toDate() ?? DateTime(2000);
+            return dateB.compareTo(dateA);
+          });
+          return docs.map((doc) {
+            final data = doc.data();
+            data['id'] = doc.id;
+            return UserSavingModel.fromJson(data);
+          }).toList();
+        });
+  }
+  Future<UserSavingModel> getSavingDetail(String savingId) async {
+    final doc = await _firestore.collection('user_savings').doc(savingId).get();
+    if (!doc.exists) throw Exception('Data tabungan tidak ditemukan');
+    final data = doc.data()!;
+    data['id'] = doc.id;
+    return UserSavingModel.fromJson(data);
+  }
+  Future<List<Map<String, dynamic>>> getAllUserSavingsWithDetail() async {
+    final savingsSnapshot = await _firestore.collection('user_savings').get();
+    List<Map<String, dynamic>> results = [];
+    for (var doc in savingsSnapshot.docs) {
+      final data = doc.data();
+      data['id'] = doc.id;
+      final saving = UserSavingModel.fromJson(data);
+      try {
+        final target = await getTargetDetail(saving.targetId);
+        double progressPercentage =
+            (saving.currentBalance / target.targetAmount) * 100;
+        if (progressPercentage > 100.0) progressPercentage = 100.0;
+        results.add({
+          'saving': saving,
+          'target': target,
+          'progressPercentage': progressPercentage,
+        });
+      } catch (e) {}
+    }
+    return results;
+  }
+  Stream<List<NotificationModel>> getNotificationsStream(String targetUser) {
+    return _firestore
+        .collection('notifications')
+        .where('target_user', isEqualTo: targetUser)
+        .orderBy('created_at', descending: true)
+        .snapshots()
+        .map((snapshot) {
+          return snapshot.docs.map((doc) {
+            final data = doc.data();
+            data['id'] = doc.id;
+            return NotificationModel.fromJson(data);
+          }).toList();
+        });
+  }
+  Future<void> markNotificationAsRead(String notifId) async {
+    await _firestore.collection('notifications').doc(notifId).update({
+      'is_read': true,
+    });
+  }
+  Future<void> _sendNotification(
+    String target,
+    String title,
+    String msg, {
+    String? referenceId,
+  }) async {
+    final docRef = _firestore.collection('notifications').doc();
+    await docRef.set({
+      'id': docRef.id,
+      'target_user': target,
+      'title': title,
+      'message': msg,
+      'is_read': false,
+      'created_at': Timestamp.now(),
+      if (referenceId != null) 'reference_id': referenceId,
+    });
+    try {
+      String? targetFcmToken;
+      if (target == 'admin') {
+        final adminQuery = await _firestore
+            .collection('users')
+            .where('role', isEqualTo: 'admin')
+            .limit(1)
+            .get();
+        if (adminQuery.docs.isNotEmpty) {
+          targetFcmToken = adminQuery.docs.first.data()['fcm_token'] as String;
+        }
+      } else {
+        final userDoc = await _firestore.collection('users').doc(target).get();
+        if (userDoc.exists) {
+          targetFcmToken = userDoc.data()!['fcm_token'] as String;
+        }
+      }
+      if (targetFcmToken != null) {
+        await FcmService.sendNotification(
+          deviceToken: targetFcmToken,
+          title: title,
+          body: msg,
+        );
+      }
+    } catch (e) {
+      print('Push Notif Error: $e');
+    }
+  }
+  Stream<List<TransactionModel>> getTransactionsBySavingIdStream(
+    String savingId,
+  ) {
+    return _firestore
+        .collection('transactions')
+        .where('saving_id', isEqualTo: savingId)
+        .orderBy('created_at', descending: true)
+        .snapshots()
+        .map((snapshot) {
+          return snapshot.docs.map((doc) {
+            final data = doc.data();
+            data['id'] = doc.id;
+            return TransactionModel.fromJson(data);
+          }).toList();
+        });
+  }
+  Future<TransactionModel> getTransactionById(String transactionId) async {
+    final doc = await _firestore
+        .collection('transactions')
+        .doc(transactionId)
+        .get();
+    if (!doc.exists) throw Exception('Transaksi tidak ditemukan');
+    final data = doc.data()!;
+    data['id'] = doc.id;
+    return TransactionModel.fromJson(data);
+  }
+  Future<void> completeSaving(String savingId) async {
+    await _firestore.collection('user_savings').doc(savingId).update({
+      'status': 'completed',
+    });
+  }
+  Future<void> markAllNotificationsAsRead(String targetUser) async {
+    final snapshot = await _firestore
+        .collection('notifications')
+        .where('target_user', isEqualTo: targetUser)
+        .where('is_read', isEqualTo: false)
+        .get();
+    final batch = _firestore.batch();
+    for (var doc in snapshot.docs) {
+      batch.update(doc.reference, {'is_read': true});
+    }
+    await batch.commit();
+  }
+  Stream<List<Map<String, dynamic>>> getAllUserSavingsWithDetailStream() {
+    return _firestore.collection('user_savings').snapshots().asyncMap((
+      snapshot,
+    ) async {
+      List<Map<String, dynamic>> results = [];
+      for (var doc in snapshot.docs) {
+        final data = doc.data();
+        data['id'] = doc.id;
+        final saving = UserSavingModel.fromJson(data);
+        try {
+          final target = await getTargetDetail(saving.targetId);
+          double progressPercentage =
+              (saving.currentBalance / target.targetAmount) * 100;
+          if (progressPercentage > 100.0) progressPercentage = 100.0;
+          Timestamp? updatedAt = data['updated_at'] as Timestamp?;
+          DateTime updateTime = updatedAt?.toDate() ?? DateTime(2000);
+          results.add({
+            'saving': saving,
+            'target': target,
+            'progressPercentage': progressPercentage,
+            'updatedAt': updateTime,
+          });
+        } catch (e) {}
+      }
+      results.sort((a, b) {
+        DateTime dateA = a['updatedAt'] as DateTime;
+        DateTime dateB = b['updatedAt'] as DateTime;
+        return dateB.compareTo(dateA);
+      });
+      return results;
+    });
+  }
+}
+</file>
+
+<file path="lib/services/storage_service.dart">
+import 'dart:io';
+import 'package:supabase_flutter/supabase_flutter.dart';
+class StorageService {
+  final SupabaseClient _supabase;
+  StorageService({SupabaseClient? supabase})
+    : _supabase = supabase ?? Supabase.instance.client;
+  Future<String> uploadTransactionEvidence(
+    File imageFile,
+    String userId,
+  ) async {
+    try {
+      final String fileName =
+          '${userId}_${DateTime.now().millisecondsSinceEpoch}.jpg';
+      final String path = 'evidences/$fileName';
+      await _supabase.storage
+          .from('qurbanku')
+          .upload(
+            path,
+            imageFile,
+            fileOptions: const FileOptions(cacheControl: '3600', upsert: false),
+          );
+      final String publicUrl = _supabase.storage
+          .from('qurbanku')
+          .getPublicUrl(path);
+      return publicUrl;
+    } catch (e) {
+      throw Exception('Gagal mengunggah gambar: ${e.toString()}');
+    }
+  }
+}
+</file>
+
+<file path="lib/utils/currency_formatter.dart">
+import 'package:intl/intl.dart';
+import 'package:flutter/services.dart';
+class CurrencyFormatter {
+  static String toRupiah(double amount) {
+    return NumberFormat.currency(
+      locale: 'id_ID',
+      symbol: 'Rp ',
+      decimalDigits: 0,
+    ).format(amount);
+  }
+}
+class CurrencyInputFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    if (newValue.text.isEmpty) {
+      return newValue.copyWith(text: '');
+    }
+    int value = int.parse(newValue.text.replaceAll(RegExp(r'[^0-9]'), ''));
+    final formatter = NumberFormat.currency(
+      locale: 'id_ID',
+      symbol: '',
+      decimalDigits: 0,
+    );
+    String newText = formatter.format(value).trim();
+    return TextEditingValue(
+      text: newText,
+      selection: TextSelection.collapsed(offset: newText.length),
+    );
+  }
+}
+</file>
+
+<file path="lib/utils/database_seeder.dart">
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/material.dart';
+class DatabaseSeeder {
+  static Future<void> seedInitialData(BuildContext context) async {
+    final auth = FirebaseAuth.instance;
+    final firestore = FirebaseFirestore.instance;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Memulai proses seeding data...')),
+    );
+    try {
+      UserCredential adminCred = await auth.createUserWithEmailAndPassword(
+        email: 'admin@qurbanku.com',
+        password: 'password123',
+      );
+      await firestore.collection('users').doc(adminCred.user!.uid).set({
+        'uid': adminCred.user!.uid,
+        'name': 'Admin Masjid',
+        'email': 'admin@qurbanku.com',
+        'role': 'admin',
+      });
+      UserCredential pesertaCred = await auth.createUserWithEmailAndPassword(
+        email: 'peserta@qurbanku.com',
+        password: 'password123',
+      );
+      await firestore.collection('users').doc(pesertaCred.user!.uid).set({
+        'uid': pesertaCred.user!.uid,
+        'name': 'Fulan (Peserta)',
+        'email': 'peserta@qurbanku.com',
+        'role': 'peserta',
+      });
+      const targetId = 'target_sapi_01';
+      await firestore.collection('saving_targets').doc(targetId).set({
+        'id': targetId,
+        'animal_type': 'Sapi Limosin (Patungan 7 Orang)',
+        'target_amount': 3500000.0,
+      });
+      final savingRef = firestore.collection('user_savings').doc();
+      await savingRef.set({
+        'id': savingRef.id,
+        'user_id': pesertaCred.user!.uid,
+        'target_id': targetId,
+        'current_balance': 0.0,
+        'status': 'active',
+      });
+      await auth.signOut();
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Seeding Berhasil! Silakan login dengan akun yang dibuat.',
+            ),
+            backgroundColor: Colors.green,
+            duration: Duration(seconds: 5),
+          ),
+        );
+      }
+    } on FirebaseAuthException catch (e) {
+      if (e.code == 'email-already-in-use') {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Data seeder sudah pernah dijalankan (Email sudah ada).',
+            ),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      } else {
+        debugPrint('Auth Error: ${e.message}');
+      }
+    } catch (e) {
+      debugPrint('Seeding Error: $e');
+    }
+  }
+  static Future<void> clearTransactionData(BuildContext context) async {
+    final firestore = FirebaseFirestore.instance;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Memulai pembersihan data transaksi & tabungan...'),
+      ),
+    );
+    try {
+      // Daftar tabel yang ingin DIHAPUS (Users dan Saving Targets aman karena tidak ditulis di sini)
+      final collectionsToClear = [
+        'transactions',
+        'user_savings',
+        'notifications',
+      ];
+      for (String collectionPath in collectionsToClear) {
+        final snapshot = await firestore.collection(collectionPath).get();
+        final batch = firestore.batch();
+        for (var doc in snapshot.docs) {
+          batch.delete(doc.reference);
+        }
+        await batch.commit(); // Eksekusi penghapusan massal per tabel
+      }
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Data transaksi, tabungan, dan notifikasi berhasil dibersihkan!',
+            ),
+            backgroundColor: Colors.blue,
+            duration: Duration(seconds: 4),
+          ),
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Gagal membersihkan data: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+}
+</file>
+
+<file path="lib/utils/pdf_generator.dart">
+import 'dart:typed_data';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:intl/intl.dart';
+import '../models/transaction_model.dart';
+import 'currency_formatter.dart';
+class PdfGenerator {
+  static Future<Uint8List> generateReport({
+    required List<TransactionModel> transactions,
+    DateTime? startDate,
+    DateTime? endDate,
+    required String statusFilter,
+  }) async {
+    final pdf = pw.Document();
+    double totalApproved = 0;
+    for (var tx in transactions) {
+      if (tx.status == TransactionStatus.approved) {
+        totalApproved += tx.amount;
+      }
+    }
+    pdf.addPage(
+      pw.MultiPage(
+        pageFormat: PdfPageFormat.a4,
+        margin: const pw.EdgeInsets.all(32),
+        build: (context) {
+          return [
+            pw.Header(
+              level: 0,
+              child: pw.Text(
+                'Laporan Riwayat Setoran Kurban',
+                style: pw.TextStyle(
+                  fontSize: 20,
+                  fontWeight: pw.FontWeight.bold,
+                ),
+              ),
+            ),
+            pw.Text(
+              'Dicetak pada: ${DateFormat('dd MMM yyyy, HH:mm').format(DateTime.now())}',
+            ),
+            pw.Text('Filter Status: $statusFilter'),
+            if (startDate != null && endDate != null)
+              pw.Text(
+                'Periode: ${DateFormat('dd MMM yyyy').format(startDate)} - ${DateFormat('dd MMM yyyy').format(endDate)}',
+              ),
+            pw.SizedBox(height: 20),
+            pw.TableHelper.fromTextArray(
+              context: context,
+              cellAlignment: pw.Alignment.centerLeft,
+              headerDecoration: const pw.BoxDecoration(
+                color: PdfColors.grey300,
+              ),
+              headerHeight: 30,
+              cellHeight: 25,
+              data: <List<String>>[
+                <String>['Tanggal', 'Status', 'Nominal', 'Catatan/Alasan'],
+                ...transactions.map((tx) {
+                  return [
+                    DateFormat('dd/MM/yyyy HH:mm').format(tx.createdAt),
+                    tx.status.name.toUpperCase(),
+                    CurrencyFormatter.toRupiah(tx.amount),
+                    tx.adminNote ?? '-',
+                  ];
+                }),
+              ],
+            ),
+            pw.SizedBox(height: 20),
+            if (statusFilter == 'Semua' || statusFilter == 'Approved')
+              pw.Align(
+                alignment: pw.Alignment.centerRight,
+                child: pw.Text(
+                  'Total Setoran Disetujui: ${CurrencyFormatter.toRupiah(totalApproved)}',
+                  style: pw.TextStyle(
+                    fontSize: 16,
+                    fontWeight: pw.FontWeight.bold,
+                  ),
+                ),
+              ),
+          ];
+        },
+      ),
+    );
+    return pdf.save();
+  }
+}
+</file>
+
+<file path="pubspec.yaml">
+name: qurban_ku
+description: "A new Flutter project."
+publish_to: "none"
+version: 1.0.0+1
+environment:
+  sdk: ^3.11.5
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  firebase_core: ^4.8.0
+  logger: ^2.7.0
+  intl: ^0.20.2
+  firebase_auth: ^6.5.0
+  cloud_firestore: ^6.4.0
+  flutter_bloc: ^9.1.1
+  equatable: ^2.0.8
+  supabase_flutter: ^2.12.4
+  image_picker: ^1.2.2
+  pdf: ^3.12.0
+  printing: ^5.14.3
+  firebase_messaging: ^16.2.1
+  http: ^1.6.0
+  googleapis_auth: ^2.3.1
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+flutter:
+  uses-material-design: true
+</file>
+
+</files>

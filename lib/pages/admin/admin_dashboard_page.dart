@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:intl/intl.dart';
+import 'package:qurban_ku/blocs/news/news_bloc.dart';
+import 'package:qurban_ku/blocs/news/news_event.dart';
 import 'package:qurban_ku/models/notification_model.dart.dart';
 import 'package:qurban_ku/models/transaction_model.dart';
 import 'package:qurban_ku/pages/admin/admin_history_page.dart';
+import 'package:qurban_ku/pages/admin/admin_news_page.dart';
 import 'package:qurban_ku/pages/admin/admin_tabungan_peserta_page.dart';
 import 'package:qurban_ku/pages/notifications_page.dart';
 import 'package:qurban_ku/services/savings_service.dart';
@@ -31,7 +34,16 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
     'Target Kurban',
     'Riwayat & Export',
     'Tabungan Peserta', // <-- TAMBAHAN
+    'Kelola Berita', // <-- TAMBAHAN
   ];
+  @override
+  void initState() {
+    super.initState();
+    // Restart stream berita dan transaksi saat masuk ke dashboard admin
+    context.read<NewsBloc>().add(LoadNews());
+    context.read<AdminBloc>().add(LoadPendingTransactions());
+  }
+
   void _showTransactionDetailDialog(BuildContext context, TransactionModel tx) {
     final dateFormatted = DateFormat('dd MMM yyyy, HH:mm').format(tx.createdAt);
 
@@ -187,7 +199,8 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
           _buildPendingTab(context),
           const AdminTargetPage(),
           const AdminHistoryPage(),
-          const AdminTabunganPesertaPage(), // <-- UBAH 2: Tambahkan halaman ke stack
+          const AdminTabunganPesertaPage(), // <-- UBAH 2: Tambahkan halaman ke
+          const AdminNewsPage(), // <-- TAMBAHAN
         ],
       ),
       bottomNavigationBar: BottomNavigationBar(
@@ -205,6 +218,10 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
           ),
           BottomNavigationBarItem(icon: Icon(Icons.history), label: 'Riwayat'),
           BottomNavigationBarItem(icon: Icon(Icons.people), label: 'Peserta'),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.article),
+            label: 'Berita',
+          ), // <-- TAMBAHAN
         ],
       ),
     );

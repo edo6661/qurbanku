@@ -1,4 +1,6 @@
-ini notifikasi nya dari notifikasi hp bisa tidak ya
+karena supabase nya suka pause, ganti dengan cloudinary saja, nanti saya yang isi cloudinary url nya, saya sudah punya apikey dan api secret nya.
+
+
 <file path="analysis_options.yaml">
 include: package:flutter_lints/flutter.yaml
 analyzer:
@@ -2285,9 +2287,7 @@ class _AdminTransactionDetailPageState
                 backgroundColor: Colors.green,
               ),
             );
-            Navigator.pop(
-              context,
-            ); // Kembali ke list notif setelah sukses approve/reject
+            Navigator.pop(context);
           }
         },
         builder: (context, state) {
@@ -2307,9 +2307,51 @@ class _AdminTransactionDetailPageState
               children: [
                 _buildRow('Status', tx.status.name.toUpperCase()),
                 _buildRow('Nama Pengkurban', tx.namaPengkurban),
-                // ... (lanjutan layout gambar dll) ...
+                _buildRow('Bin / Binti', tx.binBinti),
+                _buildRow('Tanggal Setor', dateFormatted),
+                _buildRow('Nominal', CurrencyFormatter.toRupiah(tx.amount)),
+                if (tx.status == TransactionStatus.rejected)
+                  _buildRow('Alasan Ditolak', tx.adminNote ?? '-'),
+                const SizedBox(height: 16),
+                // ✅ TAMBAHAN: Foto bukti transfer
+                const Text(
+                  'Bukti Transfer:',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: Colors.grey,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                GestureDetector(
+                  onTap: () => _showImageDialog(context, tx.evidenceUrl),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: Image.network(
+                      tx.evidenceUrl,
+                      height: 220,
+                      width: double.infinity,
+                      fit: BoxFit.cover,
+                      loadingBuilder: (context, child, loadingProgress) {
+                        if (loadingProgress == null) return child;
+                        return const SizedBox(
+                          height: 220,
+                          child: Center(child: CircularProgressIndicator()),
+                        );
+                      },
+                      errorBuilder: (context, error, stackTrace) =>
+                          const SizedBox(
+                            height: 100,
+                            child: Center(child: Text('Gagal memuat gambar')),
+                          ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'Ketuk foto untuk memperbesar',
+                  style: TextStyle(fontSize: 12, color: Colors.grey),
+                ),
                 const SizedBox(height: 24),
-                // ✅ UBAH: Cek selain tx.status == pending, cek juga isAdmin
                 if (tx.status == TransactionStatus.pending && isAdmin)
                   Row(
                     children: [
@@ -2344,6 +2386,24 @@ class _AdminTransactionDetailPageState
             ),
           );
         },
+      ),
+    );
+  }
+  // ✅ TAMBAHAN: Fungsi zoom foto
+  void _showImageDialog(BuildContext context, String imageUrl) {
+    showDialog(
+      context: context,
+      builder: (_) => Dialog(
+        backgroundColor: Colors.transparent,
+        child: GestureDetector(
+          onTap: () => Navigator.pop(context),
+          child: InteractiveViewer(
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: Image.network(imageUrl, fit: BoxFit.contain),
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -3006,6 +3066,22 @@ class _PesertaDashboardPageState extends State<PesertaDashboardPage> {
                               style: const TextStyle(
                                 fontSize: 18,
                                 fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            // ✅ TAMBAHAN: Nama pengkurban & bin/binti
+                            Text(
+                              'A.n: ${item.userSaving.namaPengkurban}',
+                              style: const TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            Text(
+                              'Bin/Binti: ${item.userSaving.binBinti}',
+                              style: const TextStyle(
+                                fontSize: 13,
+                                color: Colors.grey,
                               ),
                             ),
                             const SizedBox(height: 8),
@@ -4069,66 +4145,6 @@ class AuthService {
 }
 </file>
 
-<file path="lib/services/fcm_service.dart">
-import 'package:googleapis_auth/auth_io.dart';
-import 'package:http/http.dart' as http;
-import 'dart:convert';
-class FcmService {
-  // ISI DENGAN KONTEN FILE JSON SERVICE ACCOUNT KAMU
-  static const _serviceAccountJson = {
-    "type": "service_account",
-    "project_id": "qurban-ku-xxxxx",
-    "private_key":
-        "-----BEGIN PRIVATE KEY-----\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQDh...\n-----END PRIVATE KEY-----\n",
-    "client_email":
-        "firebase-adminsdk-xxxxx@qurban-ku-xxxxx.iam.gserviceaccount.com",
-    // ... copy semua isinya di sini
-  };
-  static const _scopes = ['https://www.googleapis.com/auth/firebase.messaging'];
-  static Future<void> sendNotification({
-    required String deviceToken,
-    required String title,
-    required String body,
-  }) async {
-    try {
-      // 1. Dapatkan akses token dari Google
-      final client = await clientViaServiceAccount(
-        ServiceAccountCredentials.fromJson(_serviceAccountJson),
-        _scopes,
-      );
-      final projectId = _serviceAccountJson['project_id'];
-      final url =
-          'https://fcm.googleapis.com/v1/projects/$projectId/messages:send';
-      // 2. Buat Body Notifikasi
-      final message = {
-        'message': {
-          'token': deviceToken,
-          'notification': {'title': title, 'body': body},
-          'data': {
-            'click_action': 'FLUTTER_NOTIFICATION_CLICK',
-            'status': 'done',
-          },
-        },
-      };
-      // 3. Kirim ke FCM
-      final response = await client.post(
-        Uri.parse(url),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode(message),
-      );
-      if (response.statusCode == 200) {
-        print('Notifikasi berhasil dikirim!');
-      } else {
-        print('Gagal kirim: ${response.body}');
-      }
-      client.close();
-    } catch (e) {
-      print('Error FCM: $e');
-    }
-  }
-}
-</file>
-
 <file path="lib/services/savings_service.dart">
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:qurban_ku/models/notification_model.dart.dart';
@@ -4455,20 +4471,32 @@ class SavingsService {
             .limit(1)
             .get();
         if (adminQuery.docs.isNotEmpty) {
-          targetFcmToken = adminQuery.docs.first.data()['fcm_token'] as String;
+          targetFcmToken =
+              adminQuery.docs.first.data()['fcm_token']
+                  as String?; // ← pakai String? bukan String
+          print('✅ FCM Token admin: $targetFcmToken');
+        } else {
+          print('❌ Admin tidak ditemukan di Firestore');
         }
       } else {
         final userDoc = await _firestore.collection('users').doc(target).get();
         if (userDoc.exists) {
-          targetFcmToken = userDoc.data()!['fcm_token'] as String;
+          targetFcmToken =
+              userDoc.data()!['fcm_token'] as String?; // ← pakai String?
+          print('✅ FCM Token user: $targetFcmToken');
+        } else {
+          print('❌ User $target tidak ditemukan');
         }
       }
       if (targetFcmToken != null) {
+        print('🚀 Mengirim push notif ke: $targetFcmToken');
         await FcmService.sendNotification(
           deviceToken: targetFcmToken,
           title: title,
           body: msg,
         );
+      } else {
+        print('❌ FCM Token null, push notif tidak dikirim');
       }
     } catch (e) {
       print('Push Notif Error: $e');

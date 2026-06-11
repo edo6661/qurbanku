@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:qurban_ku/blocs/admin/admin_bloc.dart';
 import 'package:qurban_ku/blocs/admin/admin_event.dart';
+import 'package:qurban_ku/blocs/news/news_bloc.dart';
+import 'package:qurban_ku/blocs/news/news_event.dart';
+import 'package:qurban_ku/services/news_service.dart';
 import 'package:qurban_ku/services/savings_service.dart';
 import 'package:qurban_ku/services/storage_service.dart';
 import 'blocs/auth/auth_bloc.dart';
@@ -18,12 +21,14 @@ class App extends StatelessWidget {
   final AuthService authService;
   final StorageService storageService;
   final SavingsService savingsService;
+  final NewsService newsService; //
 
   const App({
     super.key,
     required this.authService,
     required this.storageService,
     required this.savingsService,
+    required this.newsService,
   });
   @override
   Widget build(BuildContext context) {
@@ -32,6 +37,7 @@ class App extends StatelessWidget {
         RepositoryProvider.value(value: authService),
         RepositoryProvider.value(value: storageService),
         RepositoryProvider.value(value: savingsService),
+        RepositoryProvider.value(value: newsService),
       ],
       child: MultiBlocProvider(
         providers: [
@@ -49,6 +55,11 @@ class App extends StatelessWidget {
             create: (context) =>
                 AdminBloc(savingsService: context.read<SavingsService>())
                   ..add(LoadPendingTransactions()),
+          ),
+          BlocProvider<NewsBloc>(
+            create: (context) =>
+                NewsBloc(newsService: context.read<NewsService>())
+                  ..add(LoadNews()),
           ),
         ],
         child: const AppView(),

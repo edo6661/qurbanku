@@ -6,15 +6,25 @@ class SavingItem extends Equatable {
   final UserSavingModel userSaving;
   final SavingTargetModel targetDetail;
   final double progressPercentage;
+  final bool hasPendingTransaction;
+  final String depositorName;
 
   const SavingItem({
     required this.userSaving,
     required this.targetDetail,
     required this.progressPercentage,
+    this.hasPendingTransaction = false,
+    this.depositorName = '-',
   });
 
   @override
-  List<Object?> get props => [userSaving, targetDetail, progressPercentage];
+  List<Object?> get props => [
+    userSaving,
+    targetDetail,
+    progressPercentage,
+    hasPendingTransaction,
+    depositorName,
+  ];
 }
 
 abstract class SavingsState extends Equatable {

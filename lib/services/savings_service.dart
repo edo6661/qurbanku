@@ -45,7 +45,7 @@ class SavingsService {
       await _sendNotification(
         'admin',
         'Setoran Baru!',
-        'Ada setoran baru dari ${transaction.namaPengkurban} sebesar ${CurrencyFormatter.toRupiah(transaction.amount)}. Mohon segera diverifikasi.',
+        'Ada setoran baru dari ${transaction.namaPenabung} (A.n. ${transaction.namaPengkurban}) sebesar ${CurrencyFormatter.toRupiah(transaction.amount)}. Mohon segera diverifikasi.',
 
         referenceId: transaction.id,
       );
@@ -84,7 +84,10 @@ class SavingsService {
         });
   }
 
-  Future<void> approveTransaction(TransactionModel transaction) async {
+  Future<void> approveTransaction(
+    TransactionModel transaction, {
+    required String adminNote,
+  }) async {
     final savingDocRef = _firestore
         .collection('user_savings')
         .doc(transaction.savingId);
@@ -116,7 +119,10 @@ class SavingsService {
         }
       }
 
-      tx.update(transactionDocRef, {'status': TransactionStatus.approved.name});
+      tx.update(transactionDocRef, {
+        'status': TransactionStatus.approved.name,
+        'admin_note': adminNote,
+      });
 
       tx.update(savingDocRef, {
         'current_balance': newBalance,
@@ -127,7 +133,7 @@ class SavingsService {
     await _sendNotification(
       transaction.userId,
       'Setoran Diterima',
-      'Setoran Anda sebesar ${CurrencyFormatter.toRupiah(transaction.amount)} untuk atas nama ${transaction.namaPengkurban} telah diverifikasi.',
+      'Setoran Anda sebesar ${CurrencyFormatter.toRupiah(transaction.amount)} untuk atas nama ${transaction.namaPengkurban} telah diverifikasi. Catatan: $adminNote',
 
       referenceId: transaction.id,
     );
@@ -418,6 +424,22 @@ class SavingsService {
     final data = doc.data()!;
     data['id'] = doc.id;
     return TransactionModel.fromJson(data);
+  }
+
+  Future<bool> hasPendingTransaction(String savingId) async {
+    final snapshot = await _firestore
+        .collection('transactions')
+        .where('saving_id', isEqualTo: savingId)
+        .where('status', isEqualTo: TransactionStatus.pending.name)
+        .limit(1)
+        .get();
+    return snapshot.docs.isNotEmpty;
+  }
+
+  Future<String> getUserName(String userId) async {
+    final doc = await _firestore.collection('users').doc(userId).get();
+    if (!doc.exists) return '-';
+    return doc.data()?['name'] as String? ?? '-';
   }
 
   Future<void> completeSaving(String savingId) async {

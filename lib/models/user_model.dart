@@ -7,12 +7,14 @@ class UserModel extends Equatable {
   final String name;
   final String email;
   final UserRole role;
+  final String? phone;
 
   const UserModel({
     required this.uid,
     required this.name,
     required this.email,
     required this.role,
+    this.phone,
   });
 
   factory UserModel.fromJson(Map<String, dynamic> json) {
@@ -21,11 +23,28 @@ class UserModel extends Equatable {
       name: json['name'] as String,
       email: json['email'] as String,
       role: _parseRole(json['role'] as String?),
+      phone: json['phone'] as String?,
     );
   }
 
   Map<String, dynamic> toJson() {
-    return {'uid': uid, 'name': name, 'email': email, 'role': role.name};
+    return {
+      'uid': uid,
+      'name': name,
+      'email': email,
+      'role': role.name,
+      if (phone != null) 'phone': phone,
+    };
+  }
+
+  UserModel copyWith({String? name, String? phone}) {
+    return UserModel(
+      uid: uid,
+      name: name ?? this.name,
+      email: email,
+      role: role,
+      phone: phone ?? this.phone,
+    );
   }
 
   static UserRole _parseRole(String? roleStr) {
@@ -34,5 +53,5 @@ class UserModel extends Equatable {
   }
 
   @override
-  List<Object?> get props => [uid, name, email, role];
+  List<Object?> get props => [uid, name, email, role, phone];
 }

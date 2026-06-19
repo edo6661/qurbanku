@@ -73,12 +73,18 @@ class _AdminHistoryPageState extends State<AdminHistoryPage> {
             ),
             const Divider(height: 24),
             _buildDetailRow('Nama Pengkurban', tx.namaPengkurban),
+            _buildDetailRow('Penabung', tx.namaPenabung),
             _buildDetailRow('Bin / Binti', tx.binBinti),
             _buildDetailRow('Tanggal Setor', dateFormatted),
             _buildDetailRow('Nominal', CurrencyFormatter.toRupiah(tx.amount)),
             _buildDetailRow('Status', tx.status.name.toUpperCase()),
-            if (tx.status == TransactionStatus.rejected)
-              _buildDetailRow('Alasan Ditolak', tx.adminNote ?? '-'),
+            if (tx.adminNote != null && tx.adminNote!.isNotEmpty)
+              _buildDetailRow(
+                tx.status == TransactionStatus.rejected
+                    ? 'Alasan Ditolak'
+                    : 'Catatan Admin',
+                tx.adminNote!,
+              ),
             const SizedBox(height: 16),
             const Text(
               'Bukti Transfer:',
@@ -333,6 +339,13 @@ class _AdminHistoryPageState extends State<AdminHistoryPage> {
                                   ),
                                   const SizedBox(height: 4),
                                   Text(
+                                    'Penabung: ${tx.namaPenabung}',
+                                    style: const TextStyle(
+                                      fontSize: 13,
+                                      color: Colors.grey,
+                                    ),
+                                  ),
+                                  Text(
                                     'Bin/Binti: ${tx.binBinti}',
                                     style: const TextStyle(
                                       fontSize: 13,
@@ -362,12 +375,17 @@ class _AdminHistoryPageState extends State<AdminHistoryPage> {
                                       ),
                                     ],
                                   ),
-                                  if (!isApproved) ...[
+                                  if (tx.adminNote != null &&
+                                      tx.adminNote!.isNotEmpty) ...[
                                     const SizedBox(height: 8),
                                     Text(
-                                      'Alasan: ${tx.adminNote}',
-                                      style: const TextStyle(
-                                        color: Colors.red,
+                                      isApproved
+                                          ? 'Catatan: ${tx.adminNote}'
+                                          : 'Alasan: ${tx.adminNote}',
+                                      style: TextStyle(
+                                        color: isApproved
+                                            ? Colors.green.shade700
+                                            : Colors.red,
                                         fontSize: 12,
                                       ),
                                     ),

@@ -45,6 +45,45 @@ class _AdminTransactionDetailPageState
     }
   }
 
+  void _showApproveDialog(BuildContext context, TransactionModel tx) {
+    final noteController = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Setujui Transaksi'),
+        content: TextField(
+          controller: noteController,
+          decoration: const InputDecoration(
+            hintText: 'Catatan untuk peserta...',
+            border: OutlineInputBorder(),
+          ),
+          maxLines: 3,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Batal'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
+            onPressed: () {
+              if (noteController.text.trim().isNotEmpty) {
+                context.read<AdminBloc>().add(
+                  ApproveTransactionRequested(
+                    transaction: tx,
+                    adminNote: noteController.text.trim(),
+                  ),
+                );
+                Navigator.pop(dialogContext);
+              }
+            },
+            child: const Text('Setujui', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _showRejectDialog(BuildContext context, String transactionId) {
     final noteController = TextEditingController();
     showDialog(
@@ -124,11 +163,17 @@ class _AdminTransactionDetailPageState
               children: [
                 _buildRow('Status', tx.status.name.toUpperCase()),
                 _buildRow('Nama Pengkurban', tx.namaPengkurban),
+                _buildRow('Penabung', tx.namaPenabung),
                 _buildRow('Bin / Binti', tx.binBinti),
                 _buildRow('Tanggal Setor', dateFormatted),
                 _buildRow('Nominal', CurrencyFormatter.toRupiah(tx.amount)),
-                if (tx.status == TransactionStatus.rejected)
-                  _buildRow('Alasan Ditolak', tx.adminNote ?? '-'),
+                if (tx.adminNote != null && tx.adminNote!.isNotEmpty)
+                  _buildRow(
+                    tx.status == TransactionStatus.rejected
+                        ? 'Alasan Ditolak'
+                        : 'Catatan Admin',
+                    tx.adminNote!,
+                  ),
 
                 const SizedBox(height: 16),
 
@@ -194,9 +239,7 @@ class _AdminTransactionDetailPageState
                             backgroundColor: Colors.green,
                             foregroundColor: Colors.white,
                           ),
-                          onPressed: () => context.read<AdminBloc>().add(
-                            ApproveTransactionRequested(tx),
-                          ),
+                          onPressed: () => _showApproveDialog(context, tx),
                           icon: const Icon(Icons.check_circle),
                           label: const Text('Setujui'),
                         ),

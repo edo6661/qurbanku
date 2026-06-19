@@ -35,3 +35,13 @@ class AuthRegisterRequested extends AuthEvent {
   @override
   List<Object?> get props => [name, email, password];
 }
+
+class AuthProfileUpdateRequested extends AuthEvent {
+  final String name;
+  final String? phone;
+
+  const AuthProfileUpdateRequested({required this.name, this.phone});
+
+  @override
+  List<Object?> get props => [name, phone];
+}

@@ -27,7 +27,19 @@ class TransactionBloc extends Bloc<TransactionEvent, TransactionState> {
   ) async {
     emit(TransactionSubmitting());
     try {
-      // --- TAMBAHAN BARU: Ambil data nama dan bin dari tabungan ---
+      final hasPending = await _savingsService.hasPendingTransaction(
+        event.savingId,
+      );
+      if (hasPending) {
+        emit(
+          const TransactionError(
+            'Masih ada setoran yang menunggu verifikasi admin. '
+            'Tunggu hingga disetujui atau ditolak sebelum setor lagi.',
+          ),
+        );
+        return;
+      }
+
       final savingDetail = await _savingsService.getSavingDetail(
         event.savingId,
       );
@@ -47,9 +59,9 @@ class TransactionBloc extends Bloc<TransactionEvent, TransactionState> {
         evidenceUrl: evidenceUrl,
         status: TransactionStatus.pending,
         createdAt: DateTime.now(),
-        // --- TAMBAHAN BARU: Masukkan ke transaksi ---
         namaPengkurban: savingDetail.namaPengkurban,
         binBinti: savingDetail.binBinti,
+        namaPenabung: event.namaPenabung,
       );
 
       await _savingsService.submitTransaction(transaction);

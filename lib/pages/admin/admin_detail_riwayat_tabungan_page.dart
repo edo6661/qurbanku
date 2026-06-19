@@ -75,7 +75,25 @@ class AdminDetailRiwayatTabunganPage extends StatelessWidget {
                           CurrencyFormatter.toRupiah(tx.amount),
                           style: const TextStyle(fontWeight: FontWeight.bold),
                         ),
-                        subtitle: Text(dateFormatted),
+                        subtitle: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(dateFormatted),
+                            if (tx.adminNote != null &&
+                                tx.adminNote!.isNotEmpty)
+                              Text(
+                                tx.status == TransactionStatus.rejected
+                                    ? 'Ditolak: ${tx.adminNote}'
+                                    : 'Catatan: ${tx.adminNote}',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: tx.status == TransactionStatus.rejected
+                                      ? Colors.red
+                                      : Colors.green.shade700,
+                                ),
+                              ),
+                          ],
+                        ),
                         trailing: Text(
                           tx.status.name.toUpperCase(),
                           style: TextStyle(

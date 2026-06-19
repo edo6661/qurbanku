@@ -21,11 +21,15 @@ class PendingTransactionsUpdated extends AdminEvent {
 
 class ApproveTransactionRequested extends AdminEvent {
   final TransactionModel transaction;
+  final String adminNote;
 
-  const ApproveTransactionRequested(this.transaction);
+  const ApproveTransactionRequested({
+    required this.transaction,
+    required this.adminNote,
+  });
 
   @override
-  List<Object?> get props => [transaction];
+  List<Object?> get props => [transaction, adminNote];
 }
 
 class RejectTransactionRequested extends AdminEvent {

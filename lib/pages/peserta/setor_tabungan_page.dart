@@ -12,6 +12,7 @@ import '../../blocs/transaction/transaction_state.dart';
 import '../../models/transaction_model.dart';
 import '../../services/savings_service.dart';
 import '../../services/storage_service.dart';
+import '../../constants/app_constants.dart';
 import '../../utils/currency_formatter.dart';
 
 class SetorTabunganPage extends StatelessWidget {
@@ -66,6 +67,7 @@ class _SetorTabunganFormState extends State<_SetorTabunganForm> {
   @override
   void initState() {
     super.initState();
+    _amountController.addListener(_onAmountChanged);
     if (_isEditMode) {
       final formatter = NumberFormat.currency(
         locale: 'id_ID',
@@ -80,8 +82,37 @@ class _SetorTabunganFormState extends State<_SetorTabunganForm> {
 
   @override
   void dispose() {
+    _amountController.removeListener(_onAmountChanged);
     _amountController.dispose();
     super.dispose();
+  }
+
+  void _onAmountChanged() => setState(() {});
+
+  double? get _parsedAmount {
+    final cleanText = _amountController.text.replaceAll(RegExp(r'[^0-9]'), '');
+    if (cleanText.isEmpty) return null;
+    final amount = double.tryParse(cleanText);
+    if (amount == null || amount <= 0) return null;
+    return amount;
+  }
+
+  void _showCopiedSnackBar(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message), duration: const Duration(seconds: 2)),
+    );
+  }
+
+  void _copyAccountNumber() {
+    Clipboard.setData(ClipboardData(text: AppConstants.bankAccountNumber));
+    _showCopiedSnackBar('Nomor rekening berhasil disalin');
+  }
+
+  void _copyTransferAmount() {
+    final amount = _parsedAmount;
+    if (amount == null) return;
+    Clipboard.setData(ClipboardData(text: amount.toInt().toString()));
+    _showCopiedSnackBar('Nominal transfer berhasil disalin');
   }
 
   Future<void> _pickImage() async {
@@ -124,7 +155,8 @@ class _SetorTabunganFormState extends State<_SetorTabunganForm> {
               amount: amount,
               evidenceImage: _selectedImage!,
               userId: authState.user.uid,
-              savingId: widget.savingId!, // <--- BARU (Kirim ID tabungannya)
+              savingId: widget.savingId!,
+              namaPenabung: authState.user.name,
             ),
           );
         }
@@ -222,17 +254,16 @@ class _SetorTabunganFormState extends State<_SetorTabunganForm> {
                           prefixText: 'Rp ',
                         ),
                         validator: (value) {
-                          if (value == null || value.isEmpty)
+                          if (value == null || value.isEmpty) {
                             return 'Nominal wajib diisi';
+                          }
 
-                          // Hapus semua karakter selain angka
                           final cleanText = value.replaceAll(
                             RegExp(r'[^0-9]'),
                             '',
                           );
                           final amount = double.tryParse(cleanText) ?? 0.0;
 
-                          // TAMBAHAN: Validasi max amount
                           if (widget.maxAmount != null &&
                               amount > widget.maxAmount!) {
                             return 'Maksimal setoran Rp ${CurrencyFormatter.toRupiah(widget.maxAmount!)}';
@@ -240,6 +271,12 @@ class _SetorTabunganFormState extends State<_SetorTabunganForm> {
 
                           return null;
                         },
+                      ),
+                      const SizedBox(height: 24),
+                      _BankDetailCard(
+                        transferAmount: _parsedAmount,
+                        onCopyAccount: _copyAccountNumber,
+                        onCopyAmount: _copyTransferAmount,
                       ),
                       const SizedBox(height: 24),
                       const Text(
@@ -322,6 +359,175 @@ class _SetorTabunganFormState extends State<_SetorTabunganForm> {
           );
         },
       ),
+    );
+  }
+}
+
+class _BankDetailCard extends StatelessWidget {
+  final double? transferAmount;
+  final VoidCallback onCopyAccount;
+  final VoidCallback onCopyAmount;
+
+  const _BankDetailCard({
+    required this.transferAmount,
+    required this.onCopyAccount,
+    required this.onCopyAmount,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final hasAmount = transferAmount != null;
+    final amountLabel = hasAmount
+        ? CurrencyFormatter.toRupiah(transferAmount!)
+        : 'Isi nominal setoran di atas';
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.blue.shade50,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.blue.shade200),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.account_balance, color: Colors.blue.shade700),
+              const SizedBox(width: 8),
+              Text(
+                'Rekening Tujuan Transfer',
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 15,
+                  color: Colors.blue.shade900,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          _BankDetailRow(label: 'Bank', value: AppConstants.bankName),
+          const SizedBox(height: 12),
+          _BankDetailRow(
+            label: 'No. Rekening',
+            value: AppConstants.bankAccountNumber,
+            trailing: _CopyButton(
+              onPressed: onCopyAccount,
+              tooltip: 'Salin nomor rekening',
+            ),
+          ),
+          const SizedBox(height: 12),
+          _BankDetailRow(
+            label: 'Atas Nama',
+            value: AppConstants.bankAccountHolderName,
+          ),
+          const SizedBox(height: 12),
+          _BankDetailRow(
+            label: 'Nominal Transfer',
+            value: amountLabel,
+            valueStyle: TextStyle(
+              fontWeight: FontWeight.w600,
+              fontSize: 14,
+              color: hasAmount ? Colors.green.shade800 : Colors.grey.shade600,
+            ),
+            trailing: hasAmount
+                ? _CopyButton(
+                    onPressed: onCopyAmount,
+                    tooltip: 'Salin nominal transfer',
+                  )
+                : null,
+          ),
+          const SizedBox(height: 16),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.amber.shade50,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.amber.shade200),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(
+                  Icons.info_outline,
+                  size: 18,
+                  color: Colors.amber.shade800,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Pastikan Anda memasukkan nomor rekening yang benar '
+                    'dan cek kembali nilai transfer sebelum mengirim.',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.amber.shade900,
+                      height: 1.4,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CopyButton extends StatelessWidget {
+  final VoidCallback onPressed;
+  final String tooltip;
+
+  const _CopyButton({required this.onPressed, required this.tooltip});
+
+  @override
+  Widget build(BuildContext context) {
+    return IconButton(
+      onPressed: onPressed,
+      icon: const Icon(Icons.copy, size: 20),
+      tooltip: tooltip,
+      visualDensity: VisualDensity.compact,
+      padding: EdgeInsets.zero,
+      constraints: const BoxConstraints(),
+    );
+  }
+}
+
+class _BankDetailRow extends StatelessWidget {
+  final String label;
+  final String value;
+  final TextStyle? valueStyle;
+  final Widget? trailing;
+
+  const _BankDetailRow({
+    required this.label,
+    required this.value,
+    this.valueStyle,
+    this.trailing,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: 110,
+          child: Text(
+            label,
+            style: TextStyle(color: Colors.grey.shade700, fontSize: 13),
+          ),
+        ),
+        Expanded(
+          child: Text(
+            value,
+            style:
+                valueStyle ??
+                const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+          ),
+        ),
+        ?trailing,
+      ],
     );
   }
 }

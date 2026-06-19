@@ -51,11 +51,18 @@ class SavingsBloc extends Bloc<SavingsEvent, SavingsState> {
             (saving.currentBalance / targetDetail.targetAmount) * 100;
         if (progressPercentage > 100.0) progressPercentage = 100.0;
 
+        final hasPending = await _savingsService.hasPendingTransaction(
+          saving.id,
+        );
+        final depositorName = await _savingsService.getUserName(saving.userId);
+
         items.add(
           SavingItem(
             userSaving: saving,
             targetDetail: targetDetail,
             progressPercentage: progressPercentage,
+            hasPendingTransaction: hasPending,
+            depositorName: depositorName,
           ),
         );
       }

@@ -5,6 +5,8 @@ import 'package:qurban_ku/blocs/news/news_event.dart';
 import 'package:qurban_ku/models/notification_model.dart.dart';
 import 'package:qurban_ku/models/user_saving_model.dart';
 import 'package:qurban_ku/pages/notifications_page.dart';
+import 'package:qurban_ku/pages/profile/profile_page.dart';
+import 'package:qurban_ku/widgets/admin_whatsapp_card.dart';
 
 import '../../blocs/auth/auth_bloc.dart';
 import '../../blocs/auth/auth_event.dart';
@@ -68,6 +70,16 @@ class _PesertaDashboardPageState extends State<PesertaDashboardPage> {
           style: TextStyle(fontWeight: FontWeight.bold),
         ),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.person),
+            tooltip: 'Profil',
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => const ProfilePage()),
+              );
+            },
+          ),
           StreamBuilder<List<NotificationModel>>(
             stream: context.read<SavingsService>().getNotificationsStream(
               userId,
@@ -210,6 +222,9 @@ class _PesertaDashboardPageState extends State<PesertaDashboardPage> {
               ),
               const SizedBox(height: 12),
               const _NewsSection(),
+              const SizedBox(height: 24),
+              const AdminWhatsappCard(),
+              const SizedBox(height: 80),
             ],
           ),
         ),
@@ -258,6 +273,10 @@ class _PesertaDashboardPageState extends State<PesertaDashboardPage> {
                 ),
               ),
               Text(
+                'Penabung: ${item.depositorName}',
+                style: const TextStyle(fontSize: 13, color: Colors.grey),
+              ),
+              Text(
                 'Bin/Binti: ${item.userSaving.binBinti}',
                 style: const TextStyle(fontSize: 13, color: Colors.grey),
               ),
@@ -294,6 +313,7 @@ class _PesertaDashboardPageState extends State<PesertaDashboardPage> {
                   final isLunas = item.progressPercentage >= 100.0;
                   final isCompleted =
                       item.userSaving.status == SavingStatus.completed;
+                  final hasPending = item.hasPendingTransaction;
 
                   return SizedBox(
                     width: double.infinity,
@@ -323,6 +343,18 @@ class _PesertaDashboardPageState extends State<PesertaDashboardPage> {
                             ),
                             style: ElevatedButton.styleFrom(
                               backgroundColor: Colors.green,
+                            ),
+                          )
+                        : hasPending
+                        ? ElevatedButton.icon(
+                            onPressed: null,
+                            icon: const Icon(
+                              Icons.hourglass_top,
+                              color: Colors.grey,
+                            ),
+                            label: const Text(
+                              'Menunggu Verifikasi Admin',
+                              style: TextStyle(color: Colors.grey),
                             ),
                           )
                         : ElevatedButton.icon(

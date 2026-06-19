@@ -12,9 +12,9 @@ class TransactionModel extends Equatable {
   final TransactionStatus status;
   final String? adminNote;
   final DateTime createdAt;
-  // --- TAMBAHAN BARU ---
   final String namaPengkurban;
   final String binBinti;
+  final String namaPenabung;
 
   const TransactionModel({
     required this.id,
@@ -25,8 +25,9 @@ class TransactionModel extends Equatable {
     required this.savingId,
     this.adminNote,
     required this.createdAt,
-    required this.namaPengkurban, // Tambahan
-    required this.binBinti, // Tambahan
+    required this.namaPengkurban,
+    required this.binBinti,
+    this.namaPenabung = '-',
   });
 
   factory TransactionModel.fromJson(Map<String, dynamic> json) {
@@ -42,6 +43,7 @@ class TransactionModel extends Equatable {
       // Gunakan fallback agar data lama sebelum update tidak error
       namaPengkurban: json['nama_pengkurban'] as String? ?? '-',
       binBinti: json['bin_binti'] as String? ?? '-',
+      namaPenabung: json['nama_penabung'] as String? ?? '-',
     );
   }
 
@@ -55,9 +57,9 @@ class TransactionModel extends Equatable {
       'saving_id': savingId,
       if (adminNote != null) 'admin_note': adminNote,
       'created_at': Timestamp.fromDate(createdAt),
-      // --- TAMBAHAN BARU ---
       'nama_pengkurban': namaPengkurban,
       'bin_binti': binBinti,
+      'nama_penabung': namaPenabung,
     };
   }
 
@@ -82,7 +84,8 @@ class TransactionModel extends Equatable {
     status,
     adminNote,
     createdAt,
-    namaPengkurban, // Tambahan
-    binBinti, // Tambahan
+    namaPengkurban,
+    binBinti,
+    namaPenabung,
   ];
 }

@@ -13,16 +13,24 @@ class SubmitTransaction extends TransactionEvent {
   final File evidenceImage;
   final String userId;
   final String savingId;
+  final String namaPenabung;
 
   const SubmitTransaction({
     required this.amount,
     required this.evidenceImage,
     required this.userId,
     required this.savingId,
+    required this.namaPenabung,
   });
 
   @override
-  List<Object?> get props => [amount, evidenceImage, userId, savingId];
+  List<Object?> get props => [
+    amount,
+    evidenceImage,
+    userId,
+    savingId,
+    namaPenabung,
+  ];
 }
 
 class UpdateTransaction extends TransactionEvent {

@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:qurban_ku/pages/auth/forgot_password_page.dart';
 import 'package:qurban_ku/pages/auth/register_page.dart';
 import 'package:qurban_ku/utils/database_seeder.dart';
+import 'package:qurban_ku/utils/whatsapp_helper.dart';
 
 import '../../blocs/auth/auth_bloc.dart';
 import '../../blocs/auth/auth_event.dart';
@@ -21,8 +23,10 @@ class _LoginPageState extends State<LoginPage> {
 
   @override
   void initState() {
-    _emailController.text = "peserta@qurbanku.com";
+    _emailController.text = "admin@qurbanku.com";
     _passwordController.text = "password123";
+    // _emailController.text = "peserta@qurbanku.com";
+    // _passwordController.text = "password123";
 
     // TODO: implement initState
     super.initState();
@@ -118,7 +122,24 @@ class _LoginPageState extends State<LoginPage> {
                             ? null
                             : 'Password wajib diisi',
                       ),
-                      const SizedBox(height: 24),
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: TextButton(
+                          onPressed: isLoading
+                              ? null
+                              : () {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) =>
+                                          const ForgotPasswordPage(),
+                                    ),
+                                  );
+                                },
+                          child: const Text('Lupa password?'),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
                       ElevatedButton(
                         onPressed: isLoading ? null : _onLogin,
                         style: ElevatedButton.styleFrom(
@@ -147,25 +168,32 @@ class _LoginPageState extends State<LoginPage> {
                               },
                         child: const Text('Belum punya akun? Daftar di sini'),
                       ),
-                      TextButton(
-                        onPressed: () =>
-                            DatabaseSeeder.seedInitialData(context),
-                        child: const Text(
-                          'Jalankan Seeder (Buat Data Dummy)',
-                          style: TextStyle(color: Colors.grey),
-                        ),
+                      const SizedBox(height: 16),
+                      OutlinedButton.icon(
+                        onPressed: isLoading
+                            ? null
+                            : () async {
+                                try {
+                                  await WhatsAppHelper.openAdminChat();
+                                } catch (e) {
+                                  if (!context.mounted) return;
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text(
+                                        e.toString().replaceAll(
+                                          'Exception: ',
+                                          '',
+                                        ),
+                                      ),
+                                      backgroundColor: Colors.red,
+                                    ),
+                                  );
+                                }
+                              },
+                        icon: const Icon(Icons.chat, color: Color(0xFF25D366)),
+                        label: const Text('Hubungi Admin via WhatsApp'),
                       ),
-                      TextButton(
-                        onPressed: () =>
-                            DatabaseSeeder.clearTransactionData(context),
-                        child: const Text(
-                          'Hapus Riwayat Tabungan',
-                          style: TextStyle(
-                            color: Colors.red,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
+                      const SizedBox(height: 8),
                     ],
                   ),
                 );

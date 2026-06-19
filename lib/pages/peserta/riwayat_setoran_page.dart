@@ -145,6 +145,10 @@ class RiwayatSetoranPage extends StatelessWidget {
                 'A.n: ${item.userSaving.namaPengkurban}',
                 style: const TextStyle(color: Colors.grey),
               ),
+              Text(
+                'Penabung: ${item.depositorName}',
+                style: const TextStyle(fontSize: 12, color: Colors.grey),
+              ),
               const SizedBox(height: 8),
               Text(
                 'Total Terkumpul: ${CurrencyFormatter.toRupiah(item.userSaving.currentBalance)}',
@@ -250,11 +254,16 @@ class DetailRiwayatTargetPage extends StatelessWidget {
                               dateFormatted,
                               style: const TextStyle(fontSize: 12),
                             ),
-                            if (tx.status == TransactionStatus.rejected)
+                            if (tx.adminNote != null &&
+                                tx.adminNote!.isNotEmpty)
                               Text(
-                                'Ditolak: ${tx.adminNote ?? "-"}',
-                                style: const TextStyle(
-                                  color: Colors.red,
+                                tx.status == TransactionStatus.rejected
+                                    ? 'Ditolak: ${tx.adminNote}'
+                                    : 'Catatan: ${tx.adminNote}',
+                                style: TextStyle(
+                                  color: tx.status == TransactionStatus.rejected
+                                      ? Colors.red
+                                      : Colors.green.shade700,
                                   fontSize: 12,
                                 ),
                               ),

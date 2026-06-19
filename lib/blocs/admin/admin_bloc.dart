@@ -62,7 +62,10 @@ class AdminBloc extends Bloc<AdminEvent, AdminState> {
     // ... hapus final currentState = state;
     emit(AdminActionProcessing());
     try {
-      await _savingsService.approveTransaction(event.transaction);
+      await _savingsService.approveTransaction(
+        event.transaction,
+        adminNote: event.adminNote,
+      );
       emit(const AdminActionSuccess('Transaksi berhasil disetujui.'));
     } catch (e) {
       emit(AdminError('Gagal menyetujui transaksi: ${e.toString()}'));

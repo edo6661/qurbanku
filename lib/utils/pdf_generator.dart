@@ -57,10 +57,19 @@ class PdfGenerator {
               headerHeight: 30,
               cellHeight: 25,
               data: <List<String>>[
-                <String>['Tanggal', 'Status', 'Nominal', 'Catatan/Alasan'],
+                <String>[
+                  'Tanggal',
+                  'Penabung',
+                  'A.n Pengkurban',
+                  'Status',
+                  'Nominal',
+                  'Catatan/Alasan',
+                ],
                 ...transactions.map((tx) {
                   return [
                     DateFormat('dd/MM/yyyy HH:mm').format(tx.createdAt),
+                    tx.namaPenabung,
+                    tx.namaPengkurban,
                     tx.status.name.toUpperCase(),
                     CurrencyFormatter.toRupiah(tx.amount),
                     tx.adminNote ?? '-',

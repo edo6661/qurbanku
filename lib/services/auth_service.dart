@@ -64,6 +64,38 @@ class AuthService {
     await _auth.signOut();
   }
 
+  Future<void> sendPasswordResetEmail(String email) async {
+    try {
+      await _auth.sendPasswordResetEmail(email: email.trim());
+    } on FirebaseAuthException catch (e) {
+      throw Exception(_handleAuthError(e.code));
+    }
+  }
+
+  Future<UserModel> updateUserProfile({
+    required String uid,
+    required String name,
+    String? phone,
+  }) async {
+    try {
+      await _firestore.collection('users').doc(uid).update({
+        'name': name.trim(),
+        'phone': phone?.trim().isEmpty == true ? null : phone?.trim(),
+      });
+
+      final doc = await _firestore.collection('users').doc(uid).get();
+      if (!doc.exists || doc.data() == null) {
+        throw Exception('Data pengguna tidak ditemukan.');
+      }
+
+      final data = doc.data() as Map<String, dynamic>;
+      data['uid'] = uid;
+      return UserModel.fromJson(data);
+    } catch (e) {
+      throw Exception(e.toString().replaceAll('Exception: ', ''));
+    }
+  }
+
   String _handleAuthError(String errorCode) {
     switch (errorCode) {
       case 'user-not-found':

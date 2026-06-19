@@ -9,6 +9,7 @@ import 'package:qurban_ku/pages/admin/admin_history_page.dart';
 import 'package:qurban_ku/pages/admin/admin_news_page.dart';
 import 'package:qurban_ku/pages/admin/admin_tabungan_peserta_page.dart';
 import 'package:qurban_ku/pages/notifications_page.dart';
+import 'package:qurban_ku/pages/profile/profile_page.dart';
 import 'package:qurban_ku/services/savings_service.dart';
 import '../../blocs/admin/admin_bloc.dart';
 import '../../blocs/admin/admin_event.dart';
@@ -65,6 +66,7 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
             ),
             const Divider(height: 24),
             _buildDetailRow('Nama Pengkurban', tx.namaPengkurban),
+            _buildDetailRow('Penabung', tx.namaPenabung),
             _buildDetailRow('Bin / Binti', tx.binBinti),
             _buildDetailRow('Tanggal Setor', dateFormatted),
             _buildDetailRow('Nominal', CurrencyFormatter.toRupiah(tx.amount)),
@@ -134,6 +136,16 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
       appBar: AppBar(
         title: Text(_titles[_currentIndex]),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.person),
+            tooltip: 'Profil',
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => const ProfilePage()),
+              );
+            },
+          ),
           StreamBuilder<List<NotificationModel>>(
             stream: context.read<SavingsService>().getNotificationsStream(
               'admin',
@@ -309,6 +321,13 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                         ),
                         const SizedBox(height: 4),
                         Text(
+                          'Penabung: ${tx.namaPenabung}',
+                          style: const TextStyle(
+                            color: Colors.grey,
+                            fontSize: 13,
+                          ),
+                        ),
+                        Text(
                           'Bin/Binti: ${tx.binBinti}',
                           style: const TextStyle(
                             color: Colors.grey,
@@ -341,9 +360,7 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                               tooltip: 'Tolak',
                             ),
                             IconButton(
-                              onPressed: () => context.read<AdminBloc>().add(
-                                ApproveTransactionRequested(tx),
-                              ),
+                              onPressed: () => _showApproveDialog(context, tx),
                               icon: const Icon(
                                 Icons.check_circle,
                                 color: Colors.green,
@@ -374,6 +391,45 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
           mainAxisSize: MainAxisSize.min,
           children: [Image.network(imageUrl, fit: BoxFit.contain)],
         ),
+      ),
+    );
+  }
+
+  void _showApproveDialog(BuildContext context, TransactionModel tx) {
+    final noteController = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Setujui Transaksi'),
+        content: TextField(
+          controller: noteController,
+          decoration: const InputDecoration(
+            hintText: 'Catatan untuk peserta...',
+            border: OutlineInputBorder(),
+          ),
+          maxLines: 3,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Batal'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
+            onPressed: () {
+              if (noteController.text.trim().isNotEmpty) {
+                context.read<AdminBloc>().add(
+                  ApproveTransactionRequested(
+                    transaction: tx,
+                    adminNote: noteController.text.trim(),
+                  ),
+                );
+                Navigator.pop(dialogContext);
+              }
+            },
+            child: const Text('Setujui', style: TextStyle(color: Colors.white)),
+          ),
+        ],
       ),
     );
   }

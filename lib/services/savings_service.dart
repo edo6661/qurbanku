@@ -304,6 +304,7 @@ class SavingsService {
 
       try {
         final target = await getTargetDetail(saving.targetId);
+        final namaPenabung = await getUserName(saving.userId);
         double progressPercentage =
             (saving.currentBalance / target.targetAmount) * 100;
         if (progressPercentage > 100.0) progressPercentage = 100.0;
@@ -312,6 +313,7 @@ class SavingsService {
           'saving': saving,
           'target': target,
           'progressPercentage': progressPercentage,
+          'namaPenabung': namaPenabung,
         });
       } catch (e) {}
     }
@@ -473,6 +475,7 @@ class SavingsService {
         final saving = UserSavingModel.fromJson(data);
         try {
           final target = await getTargetDetail(saving.targetId);
+          final namaPenabung = await getUserName(saving.userId);
           double progressPercentage =
               (saving.currentBalance / target.targetAmount) * 100;
           if (progressPercentage > 100.0) progressPercentage = 100.0;
@@ -484,6 +487,7 @@ class SavingsService {
             'saving': saving,
             'target': target,
             'progressPercentage': progressPercentage,
+            'namaPenabung': namaPenabung,
             'updatedAt': updateTime,
           });
         } catch (e) {}

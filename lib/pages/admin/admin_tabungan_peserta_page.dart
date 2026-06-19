@@ -86,6 +86,7 @@ class _AdminTabunganPesertaPageState extends State<AdminTabunganPesertaPage> {
                   final saving = item['saving'] as UserSavingModel;
                   final target = item['target'] as SavingTargetModel;
                   final progress = item['progressPercentage'] as double;
+                  final namaPenabung = item['namaPenabung'] as String? ?? '-';
                   final isLunas = progress >= 100.0;
 
                   return Card(
@@ -150,6 +151,13 @@ class _AdminTabunganPesertaPageState extends State<AdminTabunganPesertaPage> {
                               ],
                             ),
                             const SizedBox(height: 4),
+                            Text(
+                              'Penabung: $namaPenabung',
+                              style: const TextStyle(
+                                color: Colors.grey,
+                                fontSize: 13,
+                              ),
+                            ),
                             Text(
                               'Bin/Binti: ${saving.binBinti}',
                               style: const TextStyle(
